@@ -2,9 +2,6 @@
 name: Job Scorer
 
 on:
-  schedule:
-    # Runs every 4 hours (configurable — adjust to match your quota)
-    - cron: "0 */4 * * *"
   workflow_dispatch: # Allows manual triggering from the Actions tab
 
 jobs:
