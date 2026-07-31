@@ -545,13 +545,7 @@ def download_resume_from_storage(file_name: str = "resume.pdf") -> Optional[byte
     if not bucket_name:
         logging.error("Resume storage bucket name not configured (SUPABASE_RESUME_STORAGE_BUCKET).")
         return None
-
-    try:
-        response = supabase.table("jobs").select("*").limit(1).execute()
-        print("Supabase is reachable and credentials are valid")
-    except Exception as e:
-        print("Supabase connection failed:", e)
-
+        
     try:
         logging.info(f"Downloading '{file_name}' from Supabase Storage bucket '{bucket_name}'...")
         file_bytes = supabase.storage.from_(bucket_name).download(file_name)
