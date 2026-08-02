@@ -198,76 +198,86 @@ def extract_text_from_pdf_url(pdf_url: str) -> Optional[str]:
         return None
 
 def rescore_jobs_with_custom_resume():
-    """Fetches jobs with custom resumes and re-scores them."""
+    """Fetches all jobs with custom resumes and re-scores them, in batches until none remain."""
     logging.info("--- Starting Job Re-scoring with Custom Resumes ---")
     rescore_start_time = time.time()
 
-    jobs_to_rescore = supabase_utils.get_jobs_to_rescore(config.JOBS_TO_SCORE_PER_RUN)
-    if not jobs_to_rescore:
-        logging.info("No jobs require re-scoring with custom resumes at this time.")
-        logging.info("--- Job Re-scoring Finished (No Jobs) ---")
-        return
-
-    logging.info(f"Processing {len(jobs_to_rescore)} jobs for re-scoring...")
     successful_rescores = 0
     failed_rescores = 0
+    seen_job_ids = set()
+    batch_num = 0
 
-    for i, job in enumerate(jobs_to_rescore):
-        job_id = job.get('job_id')
-        resume_link = job.get('resume_link')
-        customized_resume_id = job.get('customized_resume_id')
+    while True:
+        jobs_to_rescore = supabase_utils.get_jobs_to_rescore(config.JOBS_TO_SCORE_PER_RUN)
+        if not jobs_to_rescore:
+            break
 
-        if not job_id:
-            logging.warning(f"Skipping re-scoring for job due to missing job_id: {job}")
-            failed_rescores += 1
-            continue
+        batch_job_ids = {job.get('job_id') for job in jobs_to_rescore if job.get('job_id')}
+        if batch_job_ids and batch_job_ids.issubset(seen_job_ids):
+            logging.warning("Re-scoring batch made no forward progress (same jobs re-fetched). Stopping to avoid an infinite loop.")
+            break
+        seen_job_ids.update(batch_job_ids)
 
-        logging.info(f"--- Re-scoring Job {i+1}/{len(jobs_to_rescore)} (ID: {job_id}) ---")
+        batch_num += 1
+        logging.info(f"--- Re-scoring batch {batch_num}: processing {len(jobs_to_rescore)} jobs ---")
 
-        custom_resume_text = None
+        for i, job in enumerate(jobs_to_rescore):
+            job_id = job.get('job_id')
+            resume_link = job.get('resume_link')
+            customized_resume_id = job.get('customized_resume_id')
 
-        # Try to get resume data from database first
-        if customized_resume_id:
-            logging.info(f"Targeting customized_resume_id: {customized_resume_id}")
-            db_resume_data = supabase_utils.get_customized_resume(customized_resume_id)
-            if db_resume_data:
-                logging.info(f"Successfully retrieved customized resume data from DB for job {job_id}")
-                custom_resume_text = format_resume_to_text(db_resume_data)
+            if not job_id:
+                logging.warning(f"Skipping re-scoring for job due to missing job_id: {job}")
+                failed_rescores += 1
+                continue
+
+            logging.info(f"--- Re-scoring Job {i+1}/{len(jobs_to_rescore)} (ID: {job_id}) ---")
+
+            custom_resume_text = None
+
+            # Try to get resume data from database first
+            if customized_resume_id:
+                logging.info(f"Targeting customized_resume_id: {customized_resume_id}")
+                db_resume_data = supabase_utils.get_customized_resume(customized_resume_id)
+                if db_resume_data:
+                    logging.info(f"Successfully retrieved customized resume data from DB for job {job_id}")
+                    custom_resume_text = format_resume_to_text(db_resume_data)
+                else:
+                    logging.warning(f"Could not find customized resume data in DB for ID {customized_resume_id}. Falling back to PDF.")
+
+            # Fallback to PDF extraction if DB retrieval failed or ID was missing
+            if not custom_resume_text and resume_link:
+                logging.info(f"Attempting to extract text from custom resume PDF from {resume_link[:70]}...")
+                custom_resume_text = extract_text_from_pdf_url(resume_link)
+
+            if not custom_resume_text:
+                logging.error(f"Failed to obtain custom resume text for job_id {job_id} from both DB and PDF. Skipping.")
+                failed_rescores += 1
+                if i < len(jobs_to_rescore) - 1:
+                    logging.debug(f"Waiting {config.LLM_REQUEST_DELAY_SECONDS} seconds before next job...")
+                    time.sleep(config.LLM_REQUEST_DELAY_SECONDS)
+                continue
+
+            logging.debug(f"Custom resume text for job {job_id} (first 200 chars): {custom_resume_text[:200]}")
+            score = get_resume_score_from_ai(custom_resume_text, job)
+
+            if score is not None:
+                if supabase_utils.update_job_score(job_id, score, resume_score_stage="custom"):
+                    successful_rescores += 1
+                else:
+                    failed_rescores += 1
             else:
-                logging.warning(f"Could not find customized resume data in DB for ID {customized_resume_id}. Falling back to PDF.")
+                failed_rescores += 1
 
-        # Fallback to PDF extraction if DB retrieval failed or ID was missing
-        if not custom_resume_text and resume_link:
-            logging.info(f"Attempting to extract text from custom resume PDF from {resume_link[:70]}...")
-            custom_resume_text = extract_text_from_pdf_url(resume_link)
-
-        if not custom_resume_text:
-            logging.error(f"Failed to obtain custom resume text for job_id {job_id} from both DB and PDF. Skipping.")
-            failed_rescores += 1
             if i < len(jobs_to_rescore) - 1:
-                logging.debug(f"Waiting {config.LLM_REQUEST_DELAY_SECONDS} seconds before next job...")
+                logging.debug(f"Waiting {config.LLM_REQUEST_DELAY_SECONDS} seconds before next API call...")
                 time.sleep(config.LLM_REQUEST_DELAY_SECONDS)
-            continue
-        
-        logging.debug(f"Custom resume text for job {job_id} (first 200 chars): {custom_resume_text[:200]}")
-        score = get_resume_score_from_ai(custom_resume_text, job)
-
-        if score is not None:
-            if supabase_utils.update_job_score(job_id, score, resume_score_stage="custom"):
-                successful_rescores += 1
-            else:
-                failed_rescores += 1 
-        else:
-            failed_rescores += 1 
-
-        if i < len(jobs_to_rescore) - 1: 
-            logging.debug(f"Waiting {config.LLM_REQUEST_DELAY_SECONDS} seconds before next API call...")
-            time.sleep(config.LLM_REQUEST_DELAY_SECONDS)
 
     rescore_end_time = time.time()
     logging.info("--- Job Re-scoring Finished ---")
     logging.info(f"Successfully re-scored: {successful_rescores}")
     logging.info(f"Failed/Skipped re-scores: {failed_rescores}")
+    logging.info(f"Total jobs processed: {len(seen_job_ids)} across {batch_num} batch(es)")
     logging.info(f"Total re-scoring time: {rescore_end_time - rescore_start_time:.2f} seconds")
 
 # --- Main Execution ---
@@ -304,14 +314,25 @@ def main():
         default_resume_text = format_resume_to_text(default_resume_data)
         logging.info("Default resume data formatted to text.")
 
-        # 3. Fetch Jobs to Score
-        jobs_to_score_initially = supabase_utils.get_jobs_to_score(config.JOBS_TO_SCORE_PER_RUN)
-        if not jobs_to_score_initially:
-            logging.info("No jobs require initial scoring at this time.")
-        else:
-            logging.info(f"Processing {len(jobs_to_score_initially)} jobs for initial scoring...")
-            successful_initial_scores = 0
-            failed_initial_scores = 0
+        # 3. Fetch and score jobs in batches until none remain
+        successful_initial_scores = 0
+        failed_initial_scores = 0
+        seen_job_ids = set()
+        batch_num = 0
+
+        while True:
+            jobs_to_score_initially = supabase_utils.get_jobs_to_score(config.JOBS_TO_SCORE_PER_RUN)
+            if not jobs_to_score_initially:
+                break
+
+            batch_job_ids = {job.get('job_id') for job in jobs_to_score_initially if job.get('job_id')}
+            if batch_job_ids and batch_job_ids.issubset(seen_job_ids):
+                logging.warning("Initial scoring batch made no forward progress (same jobs re-fetched). Stopping to avoid an infinite loop.")
+                break
+            seen_job_ids.update(batch_job_ids)
+
+            batch_num += 1
+            logging.info(f"--- Initial scoring batch {batch_num}: processing {len(jobs_to_score_initially)} jobs ---")
 
             # 4. Loop Through Jobs and Score Them
             for i, job in enumerate(jobs_to_score_initially):
@@ -335,11 +356,15 @@ def main():
                 if i < len(jobs_to_score_initially) - 1:
                     logging.debug(f"Waiting {config.LLM_REQUEST_DELAY_SECONDS} seconds before next API call...")
                     time.sleep(config.LLM_REQUEST_DELAY_SECONDS)
-            
+
+        if batch_num == 0:
+            logging.info("No jobs require initial scoring at this time.")
+        else:
             initial_score_end_time = time.time()
             logging.info("--- Initial Scoring Phase Finished ---")
             logging.info(f"Successfully initially scored: {successful_initial_scores}")
             logging.info(f"Failed/Skipped initial scores: {failed_initial_scores}")
+            logging.info(f"Total jobs processed: {len(seen_job_ids)} across {batch_num} batch(es)")
             logging.info(f"Total initial scoring time: {initial_score_end_time - initial_score_start_time:.2f} seconds")
 
     # # --- Phase 2: Re-scoring with Custom Resumes ---

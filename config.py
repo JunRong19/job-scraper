@@ -43,7 +43,7 @@ CAREERS_FUTURE_SEARCH_EMPLOYMENT_TYPES = ["Full Time"]
 
 # --- Processing Limits ---
 SCRAPING_SOURCES = ["linkedin"] # "linkedin", "careers_future"
-JOBS_TO_SCORE_PER_RUN = 5
+JOBS_TO_SCORE_PER_RUN = 5 # Batch size per fetch in score_jobs.py; the script loops until all eligible jobs are scored, not a per-run cap
 JOBS_TO_CUSTOMIZE_PER_RUN = 1
 MAX_JOBS_PER_SEARCH = {
     "linkedin": 2,
