@@ -209,11 +209,11 @@ async def check_linkedin_job_activity():
     try:
         if inactive_job_ids:
             update_inactive = supabase.table(config.SUPABASE_TABLE_NAME)\
-                .update({"job_state": "removed", "is_active": False, "last_checked": now_str})\
+                .update({"job_state": "expired", "is_active": False, "last_checked": now_str})\
                 .in_("job_id", inactive_job_ids)\
                 .execute()
             # Add logging for update_inactive response count/data
-            logging.info(f"Marked {len(inactive_job_ids)} jobs as removed. Response: {update_inactive}")
+            logging.info(f"Marked {len(inactive_job_ids)} jobs as expired (no longer available on LinkedIn). Response: {update_inactive}")
 
 
         if active_checked_job_ids:
