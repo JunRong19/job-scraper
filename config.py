@@ -30,31 +30,24 @@ LLM_API_KEY = os.environ.get("LLM_API_KEY") or os.environ.get("GEMINI_API_KEY") 
 LLM_MODEL = "openai/gpt-5.4-nano"
 
 # --- Search Configuration ---
-LINKEDIN_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
+LINKEDIN_SEARCH_QUERIES = ["software engineer", "ai engineer", "software developer", "Game developer", "Game programmer", "Unity programmer"]
 LINKEDIN_LOCATION = "Singapore"
 LINKEDIN_GEO_ID = 102454443      # Singapore: 102454443, Dubai: 100205264
 LINKEDIN_JOB_TYPE = "F" # F=Full-time, C=Contract, P=Part-time, T=Temporary, I=Internship
 LINKEDIN_JOB_POSTING_DATE = "r86400" # r86400=Past 24h, r604800=Past week
 LINKEDIN_F_WT = 1 # 1=Onsite, 2=Remote, 3=Hybrid
 
-CAREERS_FUTURE_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
+CAREERS_FUTURE_SEARCH_QUERIES = ["software engineer", "ai engineer", "software developer", "Game developer", "Game programmer", "Unity programmer"]
 CAREERS_FUTURE_SEARCH_CATEGORIES = ["Information Technology"]
 CAREERS_FUTURE_SEARCH_EMPLOYMENT_TYPES = ["Full Time"]
 
-JOBSTREET_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
-JOBSTREET_BASE_URL = "https://sg.jobstreet.com"
-JOBSTREET_DATE_RANGE = 1 # Days since posting: 1=Past 24h, 3, 7, 14, 30
-JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRelevance"
-JOBSTREET_MAX_PAGES = 1 # 30 job IDs per page
-
 # --- Processing Limits ---
-SCRAPING_SOURCES = ["linkedin", "careers_future", "jobstreet"] # "linkedin", "careers_future", "jobstreet"
+SCRAPING_SOURCES = ["linkedin"] # "linkedin", "careers_future"
 JOBS_TO_SCORE_PER_RUN = 5 # Batch size per fetch in score_jobs.py; the script loops until all eligible jobs are scored, not a per-run cap
 JOBS_TO_CUSTOMIZE_PER_RUN = 1
 MAX_JOBS_PER_SEARCH = {
-    "linkedin": 3,
-    "careers_future": 5,
-    "jobstreet": 3,
+    "linkedin": 2,
+    "careers_future": 10,
 }
 
 # =================================================================
