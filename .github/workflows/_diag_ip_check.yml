@@ -14,13 +14,13 @@ jobs:
 
           echo "=== jobs.careers.gov.sg ==="
           curl -s -A "$UA" "https://jobs.careers.gov.sg/" -o cg.html -w "status=%{http_code} size=%{size_download}\n"
-          grep -o '<title>[^<]*</title>' cg.html | head -1
+          grep -o '<title>[^<]*</title>' cg.html | head -1 || true
 
           echo "=== jobs.careers.gov.sg sitemap ==="
           curl -s -A "$UA" "https://jobs.careers.gov.sg/sitemap.xml" -o cg_sitemap.xml -w "status=%{http_code} size=%{size_download}\n"
-          grep -c "<loc>" cg_sitemap.xml
+          grep -c "<loc>" cg_sitemap.xml || true
 
           echo "=== sg.indeed.com search ==="
           curl -s -A "$UA" "https://sg.indeed.com/jobs?q=software+engineer&l=Singapore" -o indeed.html -w "status=%{http_code} size=%{size_download}\n"
-          grep -o '<title>[^<]*</title>' indeed.html | head -1
+          grep -o '<title>[^<]*</title>' indeed.html | head -1 || true
           grep -ci "captcha\|are you a human\|cf-error\|blocked" indeed.html || true
