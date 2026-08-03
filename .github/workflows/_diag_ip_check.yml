@@ -1,0 +1,26 @@
+name: Diagnostic IP Check (temporary)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check outbound access to target sites
+        run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+          echo "=== jobs.careers.gov.sg ==="
+          curl -s -A "$UA" "https://jobs.careers.gov.sg/" -o cg.html -w "status=%{http_code} size=%{size_download}\n"
+          grep -o '<title>[^<]*</title>' cg.html | head -1
+
+          echo "=== jobs.careers.gov.sg sitemap ==="
+          curl -s -A "$UA" "https://jobs.careers.gov.sg/sitemap.xml" -o cg_sitemap.xml -w "status=%{http_code} size=%{size_download}\n"
+          grep -c "<loc>" cg_sitemap.xml
+
+          echo "=== sg.indeed.com search ==="
+          curl -s -A "$UA" "https://sg.indeed.com/jobs?q=software+engineer&l=Singapore" -o indeed.html -w "status=%{http_code} size=%{size_download}\n"
+          grep -o '<title>[^<]*</title>' indeed.html | head -1
+          grep -ci "captcha\|are you a human\|cf-error\|blocked" indeed.html || true
