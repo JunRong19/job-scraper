@@ -30,7 +30,7 @@ LLM_API_KEY = os.environ.get("LLM_API_KEY") or os.environ.get("GEMINI_API_KEY") 
 LLM_MODEL = "openai/gpt-5.4-nano"
 
 # --- Search Configuration ---
-LINKEDIN_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
+LINKEDIN_SEARCH_QUERIES = ["software", "ai", "unity"]
 LINKEDIN_LOCATION = "Singapore"
 LINKEDIN_GEO_ID = 102454443      # Singapore: 102454443, Dubai: 100205264
 LINKEDIN_JOB_TYPE = "F" # F=Full-time, C=Contract, P=Part-time, T=Temporary, I=Internship
@@ -44,7 +44,7 @@ LINKEDIN_F_WT = 1 # 1=Onsite, 2=Remote, 3=Hybrid
 # narrowing results on this endpoint.
 LINKEDIN_EXPERIENCE_LEVEL = 2
 
-CAREERS_FUTURE_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
+CAREERS_FUTURE_SEARCH_QUERIES = ["software", "ai", "unity"]
 CAREERS_FUTURE_SEARCH_CATEGORIES = ["Information Technology"]
 CAREERS_FUTURE_SEARCH_EMPLOYMENT_TYPES = ["Full Time"]
 # Verified via live API test: 546 -> 9 results, every result correctly tagged "Fresh/entry level".
@@ -52,7 +52,7 @@ CAREERS_FUTURE_POSITION_LEVELS = ["Fresh/entry level"]
 
 # --- JobStreet & Careers@Gov (scraped by selfhosted_scraper.py on a self-hosted runner —
 # both sites block GitHub-hosted runner IPs at the WAF level) ---
-JOBSTREET_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
+JOBSTREET_SEARCH_QUERIES = ["software", "ai", "unity"]
 JOBSTREET_BASE_URL = "https://sg.jobstreet.com"
 JOBSTREET_DATE_RANGE = 3 # Days since posting: 1=Past 24h, 3=Last 3 days, 7, 14, 30
 JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRelevance"
@@ -72,7 +72,7 @@ CAREERS_GOV_BASE_URL = "https://jobs.careers.gov.sg"
 CAREERS_GOV_ALGOLIA_URL = "https://3ow7d8b4iz-dsn.algolia.net/1/indexes/job_index/query"
 CAREERS_GOV_ALGOLIA_APP_ID = "3OW7D8B4IZ"
 CAREERS_GOV_ALGOLIA_API_KEY = "32fa71d8b0bc06be1e6395bf8c430107"
-CAREERS_GOV_SEARCH_QUERIES = ["software", "ai"]
+CAREERS_GOV_SEARCH_QUERIES = ["software", "ai", "unity"]
 # The public Algolia key above has `filters`/`facetFilters` completely disabled — any use
 # of either param (even referencing a nonexistent field) silently returns nbHits=0, no
 # error. Confirmed real employment-type/experience-level filtering happens entirely
@@ -91,10 +91,10 @@ SCRAPING_SOURCES = ["linkedin", "careers_future"] # "linkedin", "careers_future"
 JOBS_TO_SCORE_PER_RUN = 5 # Batch size per fetch in score_jobs.py; the script loops until all eligible jobs are scored, not a per-run cap
 JOBS_TO_CUSTOMIZE_PER_RUN = 1
 MAX_JOBS_PER_SEARCH = {
-    "linkedin": 3,
-    "careers_future": 5,
-    "jobstreet": 3,
-    "careers_gov": 5,
+    "linkedin": 10,
+    "careers_future": 10,
+    "jobstreet": 10,
+    "careers_gov": 10,
 }
 
 # =================================================================
