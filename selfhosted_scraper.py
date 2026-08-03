@@ -3,6 +3,7 @@ import time
 import random
 import logging
 import json
+import re
 from datetime import datetime, timezone
 import config
 import supabase_utils
@@ -318,14 +319,123 @@ def _fetch_careers_gov_search_hits(query: str, hits_per_page: int) -> list:
     logging.info(f"Careers@Gov search for '{query}' returned {len(hits)} hit(s) (of {data.get('nbHits')} total matching).")
     return hits
 
+def _careers_gov_detail_url(object_id: str) -> str | None:
+    """
+    Builds the job detail page URL from an Algolia objectID. The part after the source
+    prefix already matches the site's URL path suffix (e.g. "HRP:{id}/{uuid}" -> /jobs/hrp/{id}/{uuid}).
+    """
+    if object_id.startswith("HRP:"):
+        return f"{config.CAREERS_GOV_BASE_URL}/jobs/hrp/{object_id[4:]}"
+    if object_id.startswith("GREENHOUSE:"):
+        return f"{config.CAREERS_GOV_BASE_URL}/jobs/greenhouse/{object_id[11:]}"
+    return None
+
+def _extract_job_posting_ld_json(html: str) -> dict | None:
+    """Extracts the schema.org JobPosting JSON-LD block Careers@Gov embeds in every job page."""
+    for m in re.finditer(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', html, re.S):
+        try:
+            data = json.loads(m.group(1))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and data.get("@type") == "JobPosting":
+            return data
+    return None
+
+def _fetch_careers_gov_description(object_id: str) -> str | None:
+    """
+    Fetches the job's own detail page and extracts its description from the JobPosting
+    JSON-LD as real HTML. Algolia's search index flattens descriptions to plain text and
+    loses structure (bullets become bare "•" with no paragraph breaks, HTML entities like
+    &#39; go undecoded) — the detail page has proper <p>/<li>/<strong> tags instead, run
+    through the same convert_html_to_markdown pipeline every other source uses.
+    """
+    detail_url = _careers_gov_detail_url(object_id)
+    if not detail_url:
+        logging.warning(f"Unrecognized Careers@Gov objectID format: {object_id}")
+        return None
+
+    logging.info(f"Preparing to fetch full description for Careers@Gov job: {object_id}")
+    sleep_time = random.uniform(3.0, 10.0)
+    logging.info(f"Waiting for {sleep_time:.2f} seconds before fetching details...")
+    time.sleep(sleep_time)
+
+    headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
+    logging.info(f"Fetching details from: {detail_url}")
+
+    resp = None
+    retries = 0
+    while retries <= config.MAX_RETRIES:
+        try:
+            resp = requests.get(detail_url, headers=headers, timeout=config.REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            break
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 429 and retries < config.MAX_RETRIES:
+                retries += 1
+                wait_time = config.RETRY_DELAY_SECONDS + random.uniform(0, 5)
+                logging.warning(f"Error 429 for {object_id}. Retrying attempt {retries}/{config.MAX_RETRIES} after {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+                headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
+                continue
+            elif e.response.status_code == 404:
+                logging.warning(f"Job details not found (404) for Careers@Gov job: {object_id}.")
+                return None
+            else:
+                logging.error(f"HTTP Error fetching details for Careers@Gov job {object_id}: {e}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request Exception fetching details for Careers@Gov job {object_id}: {e}")
+            return None
+
+    if resp is None:
+        logging.error(f"Failed to fetch details for Careers@Gov job {object_id} after {retries} retries (unexpected state).")
+        return None
+
+    posting = _extract_job_posting_ld_json(resp.text)
+    if not posting:
+        logging.warning(f"No JobPosting JSON-LD found for Careers@Gov job {object_id}.")
+        return None
+
+    content_html = posting.get('description') or ''
+    if not content_html.strip():
+        logging.warning(f"Description HTML was empty for Careers@Gov job {object_id}.")
+        return None
+
+    return _normalize_bullet_lines(convert_html_to_markdown(content_html))
+
+def _normalize_bullet_lines(markdown_text: str) -> str:
+    """
+    Some Careers@Gov postings author bullet lists as literal "• " text with raw \\n between
+    items instead of real <li> markup, so convert_html_to_markdown passes them through
+    unchanged. "•" isn't a valid CommonMark list marker, so the frontend's markdown
+    renderer treats the whole run as one paragraph regardless of the newlines. Converting
+    to "- " (and ensuring a blank line precedes the first item) makes it a real list.
+    """
+    lines = markdown_text.split('\n')
+    out = []
+    prev_was_bullet = False
+    for line in lines:
+        stripped = line.strip()
+        is_bullet = stripped.startswith('•')
+        if is_bullet:
+            content = stripped[1:].strip()
+            if not prev_was_bullet and out and out[-1].strip():
+                out.append('')
+            out.append(f"- {content}")
+        else:
+            out.append(line)
+        prev_was_bullet = is_bullet
+    return '\n'.join(out)
+
 def _careers_gov_hit_to_job_details(hit: dict) -> dict | None:
-    """Converts a single Algolia search hit into the standard job_details dict."""
+    """Converts a single Algolia search hit into the standard job_details dict, fetching
+    the real description from the job's own detail page (see _fetch_careers_gov_description)."""
     object_id = hit.get('objectID')
     title = hit.get('title')
     if not object_id or not title:
         return None
 
-    description = (hit.get('description') or '').replace('\xa0', ' ').strip()
+    description = _fetch_careers_gov_description(object_id)
 
     posted_at = None
     activity_ts = hit.get('activityTimestamp')
@@ -342,15 +452,15 @@ def _careers_gov_hit_to_job_details(hit: dict) -> dict | None:
         "location": "Singapore",
         "level": None,
         "provider": "careers_gov",
-        "description": description if description else None,
+        "description": description,
         "posted_at": posted_at,
     }
 
 def process_careers_gov_query(search_query: str, limit: int = None) -> list:
     """
     Orchestrates search + filtering for a single Careers@Gov query, mirroring the other
-    sources: fetch a batch of hits, filter against Supabase, truncate to limit. The search
-    response already includes the full description, so no per-job detail fetch is needed.
+    sources: fetch a batch of hits, filter against Supabase, truncate to limit, then fetch
+    each surviving job's own detail page for its real (properly structured) description.
     """
     fetch_size = (limit or 5) * 4  # headroom so dedup filtering still leaves enough to reach `limit`
     hits = _fetch_careers_gov_search_hits(search_query, hits_per_page=fetch_size)
