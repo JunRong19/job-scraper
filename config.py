@@ -55,7 +55,6 @@ CAREERS_FUTURE_POSITION_LEVELS = ["Fresh/entry level"]
 JOBSTREET_SEARCH_QUERIES = ["software", "ai", "unity"]
 JOBSTREET_BASE_URL = "https://sg.jobstreet.com"
 JOBSTREET_DATE_RANGE = 1 # Days since posting: 1=Past 24h, 3=Last 3 days, 7, 14, 30
-JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRelevance"
 JOBSTREET_MAX_PAGES = 1 # 30 job IDs per page
 # Tried switching to JobStreet's SEO category-slug URLs (e.g. /software-jobs/full-time
 # /on-site) for more relevant results, but only "software" maps to a real classification
