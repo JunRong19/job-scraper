@@ -48,9 +48,7 @@ JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRele
 JOBSTREET_MAX_PAGES = 1 # 30 job IDs per page
 
 # --- Processing Limits ---
-# JobStreet is scraped separately via jobstreet_scraper.py (run on a self-hosted runner,
-# since JobStreet's bot protection blocks GitHub-hosted runner IPs) — not gated here.
-SCRAPING_SOURCES = ["linkedin", "careers_future"] # "linkedin", "careers_future"
+SCRAPING_SOURCES = ["linkedin", "careers_future", "jobstreet"] # "linkedin", "careers_future", "jobstreet"
 JOBS_TO_SCORE_PER_RUN = 5 # Batch size per fetch in score_jobs.py; the script loops until all eligible jobs are scored, not a per-run cap
 JOBS_TO_CUSTOMIZE_PER_RUN = 1
 MAX_JOBS_PER_SEARCH = {
