@@ -36,18 +36,32 @@ LINKEDIN_GEO_ID = 102454443      # Singapore: 102454443, Dubai: 100205264
 LINKEDIN_JOB_TYPE = "F" # F=Full-time, C=Contract, P=Part-time, T=Temporary, I=Internship
 LINKEDIN_JOB_POSTING_DATE = "r86400" # r86400=Past 24h, r604800=Past week
 LINKEDIN_F_WT = 1 # 1=Onsite, 2=Remote, 3=Hybrid
+# 1=Internship, 2=Entry level, 3=Associate, 4=Mid-Senior level, 5=Director, 6=Executive.
+# NOTE: verified via live test that LinkedIn's public/guest search API (no login) only
+# reliably enforces f_E=1 (Internship) — f_E=2 (Entry level) returned byte-identical
+# results to no f_E filter and to f_E=4 (Mid-Senior) in side-by-side testing. Sent anyway
+# since it's the technically-correct param and doesn't hurt, but don't rely on it actually
+# narrowing results on this endpoint.
+LINKEDIN_EXPERIENCE_LEVEL = 2
 
 CAREERS_FUTURE_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
 CAREERS_FUTURE_SEARCH_CATEGORIES = ["Information Technology"]
 CAREERS_FUTURE_SEARCH_EMPLOYMENT_TYPES = ["Full Time"]
+# Verified via live API test: 546 -> 9 results, every result correctly tagged "Fresh/entry level".
+CAREERS_FUTURE_POSITION_LEVELS = ["Fresh/entry level"]
 
 # --- JobStreet & Careers@Gov (scraped by selfhosted_scraper.py on a self-hosted runner —
 # both sites block GitHub-hosted runner IPs at the WAF level) ---
 JOBSTREET_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
 JOBSTREET_BASE_URL = "https://sg.jobstreet.com"
-JOBSTREET_DATE_RANGE = 1 # Days since posting: 1=Past 24h, 3, 7, 14, 30
+JOBSTREET_DATE_RANGE = 3 # Days since posting: 1=Past 24h, 3=Last 3 days, 7, 14, 30
 JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRelevance"
 JOBSTREET_MAX_PAGES = 1 # 30 job IDs per page
+# Verified live via SSR state echo (window.SEEK_REDUX_DATA): both params round-trip
+# correctly as plain query params on the generic /jobs?keywords=... path, no need for
+# JobStreet's SEO slug URLs (e.g. /software-engineer-jobs/full-time/on-site).
+JOBSTREET_WORK_TYPE = "242" # Full time (SEEK internal code; confirmed via /software-engineer-jobs/full-time)
+JOBSTREET_WORK_ARRANGEMENT = "1" # On-site (confirmed via /software-engineer-jobs/full-time/on-site)
 
 CAREERS_GOV_BASE_URL = "https://jobs.careers.gov.sg"
 # Careers@Gov's own search (used by the browser search bar) hits Algolia directly, not
@@ -59,6 +73,16 @@ CAREERS_GOV_ALGOLIA_URL = "https://3ow7d8b4iz-dsn.algolia.net/1/indexes/job_inde
 CAREERS_GOV_ALGOLIA_APP_ID = "3OW7D8B4IZ"
 CAREERS_GOV_ALGOLIA_API_KEY = "32fa71d8b0bc06be1e6395bf8c430107"
 CAREERS_GOV_SEARCH_QUERIES = ["software", "ai"]
+# The public Algolia key above has `filters`/`facetFilters` completely disabled — any use
+# of either param (even referencing a nonexistent field) silently returns nbHits=0, no
+# error. Confirmed real employment-type/experience-level filtering happens entirely
+# client-side in the browser, against a ~2000-job dataset embedded as JSON on every page
+# load (reverse-engineered from the site's own JS bundle, chunks/app/page-*.js). We fetch
+# that same dataset once per run and cross-reference Algolia's search hits against it.
+# "Full-time" in the site's filter UI maps to employmentType being any of these three
+# (case-insensitive) — verified this exact mapping against the live UI's result count.
+CAREERS_GOV_FULL_TIME_EMPLOYMENT_TYPES = {"full-time", "permanent", "permanent/contract"}
+CAREERS_GOV_EXPERIENCE_LEVEL = "0 - 1 year"
 
 SELF_HOSTED_SCRAPING_SOURCES = ["careers_gov", "jobstreet"] # "careers_gov", "jobstreet"
 

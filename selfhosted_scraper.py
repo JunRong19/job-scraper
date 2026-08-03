@@ -56,7 +56,8 @@ def _fetch_jobstreet_job_ids(search_query: str) -> list:
     while page <= max_pages:
         target_url = (
             f"{config.JOBSTREET_BASE_URL}/jobs?keywords={search_query.replace(' ', '%20')}"
-            f"&daterange={config.JOBSTREET_DATE_RANGE}&sortmode={config.JOBSTREET_SORT_MODE}&page={page}"
+            f"&daterange={config.JOBSTREET_DATE_RANGE}&sortmode={config.JOBSTREET_SORT_MODE}"
+            f"&worktype={config.JOBSTREET_WORK_TYPE}&workarrangement={config.JOBSTREET_WORK_ARRANGEMENT}&page={page}"
         )
 
         if page > 1:
@@ -278,6 +279,107 @@ def process_jobstreet_query(search_query: str, limit: int = None) -> list:
 # =====================================================================
 # Careers@Gov Scraping Logic
 # =====================================================================
+def _find_jobs_array(obj):
+    """Recursively searches a parsed Next.js RSC payload for the first dict with a 'jobs' list key."""
+    if isinstance(obj, dict):
+        if isinstance(obj.get('jobs'), list):
+            return obj['jobs']
+        for v in obj.values():
+            found = _find_jobs_array(v)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _find_jobs_array(v)
+            if found is not None:
+                return found
+    return None
+
+def _fetch_careers_gov_job_dataset() -> dict:
+    """
+    Fetches the ~2000-job dataset Careers@Gov embeds as JSON on every page load, used to
+    power the site's employment-type/experience-level filters entirely client-side.
+
+    This exists because the public Algolia key used for search (see
+    _fetch_careers_gov_search_hits) has `filters`/`facetFilters` completely disabled —
+    verified live: any use of either param, even referencing a field that doesn't exist,
+    silently returns nbHits=0 with no error. The real filtering happens in the browser
+    against this embedded dataset instead (reverse-engineered from the site's own JS
+    bundle, chunks/app/page-*.js — see CAREERS_GOV_FULL_TIME_EMPLOYMENT_TYPES).
+
+    Returns a dict keyed by the job's "id" field, which matches an Algolia objectID with
+    its "HRP:"/"GREENHOUSE:" source prefix stripped (see
+    _careers_gov_job_id_from_object_id). Fetched once per script run, not once per query.
+    """
+    headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
+
+    try:
+        resp = requests.get(config.CAREERS_GOV_BASE_URL + '/', headers=headers, timeout=config.REQUEST_TIMEOUT)
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to fetch Careers@Gov job dataset: {e}")
+        return {}
+
+    html = resp.text
+    marker = '\\"jobs\\":['
+    marker_idx = html.find(marker)
+    if marker_idx == -1:
+        logging.warning("Could not find embedded jobs dataset on Careers@Gov homepage.")
+        return {}
+
+    push_start = html.rfind('self.__next_f.push([', 0, marker_idx)
+    push_end = html.find('])</script>', marker_idx)
+    if push_start == -1 or push_end == -1:
+        logging.warning("Could not locate RSC script boundaries around Careers@Gov jobs dataset.")
+        return {}
+
+    chunk = html[push_start + len('self.__next_f.push('):push_end + 1]
+    try:
+        outer = json.loads(chunk)
+        inner = outer[1]
+        colon_idx = inner.find(':')
+        data = json.loads(inner[colon_idx + 1:])
+    except (json.JSONDecodeError, IndexError, ValueError, TypeError) as e:
+        logging.error(f"Failed to parse Careers@Gov jobs dataset RSC payload: {e}")
+        return {}
+
+    jobs_list = _find_jobs_array(data)
+    if jobs_list is None:
+        logging.warning("Parsed Careers@Gov RSC payload but found no 'jobs' array inside it.")
+        return {}
+
+    dataset = {job['id']: job for job in jobs_list if isinstance(job, dict) and job.get('id')}
+    logging.info(f"Fetched Careers@Gov job dataset: {len(dataset)} jobs (for employment-type/experience-level filtering).")
+    return dataset
+
+def _careers_gov_job_id_from_object_id(object_id: str) -> str | None:
+    """Strips the Algolia objectID's source prefix to match the job dataset's "id" field."""
+    if object_id.startswith("HRP:"):
+        return object_id[4:]
+    if object_id.startswith("GREENHOUSE:"):
+        return object_id[11:]
+    return None
+
+def _careers_gov_matches_filters(job_meta: dict | None) -> bool:
+    """
+    Checks a job dataset entry against CAREERS_GOV_FULL_TIME_EMPLOYMENT_TYPES /
+    CAREERS_GOV_EXPERIENCE_LEVEL. The "Full-time" employment-type filter option on the
+    live site maps to more than a literal "Full-time" string — verified against the site's
+    own JS bundle and its live result count.
+    """
+    if not job_meta:
+        return False
+
+    employment_type = job_meta.get('employmentType')
+    if not isinstance(employment_type, str) or employment_type.lower() not in config.CAREERS_GOV_FULL_TIME_EMPLOYMENT_TYPES:
+        return False
+
+    experience_levels = job_meta.get('experienceLevels')
+    if not isinstance(experience_levels, list):
+        return False
+    target = config.CAREERS_GOV_EXPERIENCE_LEVEL.lower()
+    return any(isinstance(lvl, str) and lvl.lower() == target for lvl in experience_levels)
+
 def _fetch_careers_gov_search_hits(query: str, hits_per_page: int) -> list:
     """
     Queries Careers@Gov's Algolia search index directly — the same call the site's own
@@ -456,13 +558,18 @@ def _careers_gov_hit_to_job_details(hit: dict) -> dict | None:
         "posted_at": posted_at,
     }
 
-def process_careers_gov_query(search_query: str, limit: int = None) -> list:
+def process_careers_gov_query(search_query: str, job_dataset: dict, limit: int = None) -> list:
     """
     Orchestrates search + filtering for a single Careers@Gov query, mirroring the other
-    sources: fetch a batch of hits, filter against Supabase, truncate to limit, then fetch
-    each surviving job's own detail page for its real (properly structured) description.
+    sources: fetch a batch of hits, filter against Supabase, apply the
+    employment-type/experience-level filter via job_dataset (see
+    _fetch_careers_gov_job_dataset), truncate to limit, then fetch each surviving job's
+    own detail page for its real (properly structured) description.
     """
-    fetch_size = (limit or 5) * 4  # headroom so dedup filtering still leaves enough to reach `limit`
+    # Broader headroom than the other sources' 4x: the employment-type/experience-level
+    # filter is applied after this fetch and typically only keeps a small fraction of
+    # hits (verified live: ~1% of all Careers@Gov jobs are both Full-time and 0-1 year).
+    fetch_size = max(50, (limit or 5) * 10)
     hits = _fetch_careers_gov_search_hits(search_query, hits_per_page=fetch_size)
     if not hits:
         logging.info(f"No search hits for Careers@Gov query '{search_query}'.")
@@ -473,6 +580,18 @@ def process_careers_gov_query(search_query: str, limit: int = None) -> list:
 
     new_hits = [h for h in hits if h.get('objectID') and h['objectID'] not in job_ids_set]
     logging.info(f"Found {len(hits)} hits, {len(job_ids_set)} existing IDs in Supabase, {len(new_hits)} new.")
+
+    if not new_hits:
+        return []
+
+    filtered_hits = []
+    for h in new_hits:
+        job_id_key = _careers_gov_job_id_from_object_id(h['objectID'])
+        job_meta = job_dataset.get(job_id_key) if job_id_key else None
+        if _careers_gov_matches_filters(job_meta):
+            filtered_hits.append(h)
+    logging.info(f"{len(filtered_hits)} of {len(new_hits)} new hits are Full-time + {config.CAREERS_GOV_EXPERIENCE_LEVEL} experience.")
+    new_hits = filtered_hits
 
     if not new_hits:
         return []
@@ -504,10 +623,11 @@ if __name__ == "__main__":
     if "careers_gov" in config.SELF_HOSTED_SCRAPING_SOURCES:
         logging.info("\n--- Starting Careers@Gov Job Scraping ---")
         max_jobs_per_search = config.MAX_JOBS_PER_SEARCH.get("careers_gov", getattr(config, 'DEFAULT_MAX_JOBS_PER_SEARCH', 5))
+        careers_gov_job_dataset = _fetch_careers_gov_job_dataset()
         for query in config.CAREERS_GOV_SEARCH_QUERIES:
             print(f"\n{'='*20} Processing Careers@Gov Search Query: '{query}' {'='*20}")
 
-            new_careers_gov_jobs = process_careers_gov_query(query, limit=max_jobs_per_search)
+            new_careers_gov_jobs = process_careers_gov_query(query, careers_gov_job_dataset, limit=max_jobs_per_search)
 
             if new_careers_gov_jobs:
                 print(f"\n--- Saving {len(new_careers_gov_jobs)} new job(s) for query '{query}' ---")

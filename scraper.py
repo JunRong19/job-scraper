@@ -86,7 +86,7 @@ def _fetch_linkedin_job_ids(search_query: str, location: str) -> list:
 
     logging.info(f"--- Starting Phase 1: Scraping Job IDs (Max Start: {max_start}) ---")
     while start <= max_start:
-        target_url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={search_query.replace(' ', '%20')}&location={location}&geoId={config.LINKEDIN_GEO_ID}&f_TPR={config.LINKEDIN_JOB_POSTING_DATE}&f_JT={config.LINKEDIN_JOB_TYPE}&f_WT={config.LINKEDIN_F_WT}&start={start}"
+        target_url = f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords={search_query.replace(' ', '%20')}&location={location}&geoId={config.LINKEDIN_GEO_ID}&f_TPR={config.LINKEDIN_JOB_POSTING_DATE}&f_JT={config.LINKEDIN_JOB_TYPE}&f_WT={config.LINKEDIN_F_WT}&f_E={config.LINKEDIN_EXPERIENCE_LEVEL}&start={start}"
 
         if start > 0:
             sleep_time = random.uniform(5.0, 15.0)
@@ -475,6 +475,7 @@ def _fetch_careers_future_jobs(search_query: str) -> list:
         'search': search_query,
         'categories':config.CAREERS_FUTURE_SEARCH_CATEGORIES,
         'employmentTypes': config.CAREERS_FUTURE_SEARCH_EMPLOYMENT_TYPES,
+        'positionLevels': config.CAREERS_FUTURE_POSITION_LEVELS,
         'postingCompany' : [],
         'sortBy': ["new_posting_date"],
         'skillUuids': skillUuids,
