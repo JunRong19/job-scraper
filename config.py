@@ -57,11 +57,11 @@ JOBSTREET_BASE_URL = "https://sg.jobstreet.com"
 JOBSTREET_DATE_RANGE = 1 # Days since posting: 1=Past 24h, 3=Last 3 days, 7, 14, 30
 JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRelevance"
 JOBSTREET_MAX_PAGES = 1 # 30 job IDs per page
-# Switched from the generic /jobs?keywords=... text search (matched the query word
-# anywhere in title/description, very noisy) to JobStreet's SEO category-slug URLs
-# (e.g. /software-jobs/full-time/on-site), which filter by job classification instead
-# and return far more relevant results. Confirmed live: same window.SEEK_REDUX_DATA
-# shape, daterange/sortmode/page all still work as query params on the slug path.
+# Tried switching to JobStreet's SEO category-slug URLs (e.g. /software-jobs/full-time
+# /on-site) for more relevant results, but only "software" maps to a real classification
+# slug — "ai"/"unity" aren't recognized, so JobStreet silently drops the category filter
+# and returns generic full-time+on-site listings (confirmed live: unrelated titles like
+# "3D Designer", "HR & Admin Assistant"). Reverted to plain keyword search for now.
 
 CAREERS_GOV_BASE_URL = "https://jobs.careers.gov.sg"
 # Careers@Gov's own search (used by the browser search bar) hits Algolia directly, not

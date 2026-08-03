@@ -54,10 +54,9 @@ def _fetch_jobstreet_job_ids(search_query: str) -> list:
 
     logging.info(f"--- Starting Phase 1: Scraping JobStreet Job IDs (Max Pages: {max_pages}) ---")
     while page <= max_pages:
-        slug = search_query.replace(' ', '-')
         target_url = (
-            f"{config.JOBSTREET_BASE_URL}/{slug}-jobs/full-time/on-site"
-            f"?daterange={config.JOBSTREET_DATE_RANGE}&sortmode={config.JOBSTREET_SORT_MODE}&page={page}"
+            f"{config.JOBSTREET_BASE_URL}/jobs?keywords={search_query.replace(' ', '%20')}"
+            f"&daterange={config.JOBSTREET_DATE_RANGE}&sortmode={config.JOBSTREET_SORT_MODE}&page={page}"
         )
 
         if page > 1:
