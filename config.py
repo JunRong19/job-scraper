@@ -41,6 +41,23 @@ CAREERS_FUTURE_SEARCH_QUERIES = ["software engineer", "software developer", "ai 
 CAREERS_FUTURE_SEARCH_CATEGORIES = ["Information Technology"]
 CAREERS_FUTURE_SEARCH_EMPLOYMENT_TYPES = ["Full Time"]
 
+# --- JobStreet & Careers@Gov (scraped by selfhosted_scraper.py on a self-hosted runner —
+# both sites block GitHub-hosted runner IPs at the WAF level) ---
+JOBSTREET_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
+JOBSTREET_BASE_URL = "https://sg.jobstreet.com"
+JOBSTREET_DATE_RANGE = 1 # Days since posting: 1=Past 24h, 3, 7, 14, 30
+JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRelevance"
+JOBSTREET_MAX_PAGES = 1 # 30 job IDs per page
+
+CAREERS_GOV_BASE_URL = "https://jobs.careers.gov.sg"
+# Sitemap.xml has no per-job date or search filtering, so these keywords are matched
+# (case-insensitive substring) against each candidate job's title after fetching it,
+# rather than sent as a server-side query like the other sources.
+CAREERS_GOV_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
+CAREERS_GOV_MAX_NEW_JOBS_PER_RUN = 5 # Caps sitemap candidates fetched+filtered per run, not a per-query limit
+
+SELF_HOSTED_SCRAPING_SOURCES = ["careers_gov", "jobstreet"] # "careers_gov", "jobstreet"
+
 # --- Processing Limits ---
 SCRAPING_SOURCES = ["linkedin", "careers_future"] # "linkedin", "careers_future"
 JOBS_TO_SCORE_PER_RUN = 5 # Batch size per fetch in score_jobs.py; the script loops until all eligible jobs are scored, not a per-run cap
@@ -48,6 +65,7 @@ JOBS_TO_CUSTOMIZE_PER_RUN = 1
 MAX_JOBS_PER_SEARCH = {
     "linkedin": 3,
     "careers_future": 5,
+    "jobstreet": 3,
 }
 
 # =================================================================
