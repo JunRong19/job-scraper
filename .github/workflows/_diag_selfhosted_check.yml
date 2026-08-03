@@ -9,14 +9,17 @@ jobs:
 
     steps:
       - name: Check outbound access from self-hosted runner
-        shell: bash
+        shell: pwsh
         run: |
-          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+          $ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+          $headers = @{ "User-Agent" = $ua }
 
-          echo "=== jobs.careers.gov.sg ==="
-          curl -s -A "$UA" "https://jobs.careers.gov.sg/" -o cg.html -w "status=%{http_code} size=%{size_download}\n"
-          grep -o '<title>[^<]*</title>' cg.html | head -1 || true
+          Write-Host "=== jobs.careers.gov.sg ==="
+          $cg = Invoke-WebRequest -Uri "https://jobs.careers.gov.sg/" -Headers $headers -SkipHttpErrorCheck
+          Write-Host "status=$($cg.StatusCode) size=$($cg.RawContentLength)"
+          if ($cg.Content -match '<title>([^<]*)</title>') { Write-Host $matches[1] }
 
-          echo "=== jobstreet ==="
-          curl -s -A "$UA" "https://sg.jobstreet.com/jobs?keywords=software%20engineer" -o js.html -w "status=%{http_code} size=%{size_download}\n"
-          grep -c "SEEK_REDUX_DATA" js.html || true
+          Write-Host "=== jobstreet ==="
+          $js = Invoke-WebRequest -Uri "https://sg.jobstreet.com/jobs?keywords=software%20engineer" -Headers $headers -SkipHttpErrorCheck
+          Write-Host "status=$($js.StatusCode) size=$($js.RawContentLength)"
+          Write-Host "SEEK_REDUX_DATA present: $($js.Content -match 'SEEK_REDUX_DATA')"
