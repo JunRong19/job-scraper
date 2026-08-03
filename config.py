@@ -92,8 +92,8 @@ SCRAPING_SOURCES = ["linkedin", "careers_future"] # "linkedin", "careers_future"
 JOBS_TO_SCORE_PER_RUN = 5 # Batch size per fetch in score_jobs.py; the script loops until all eligible jobs are scored, not a per-run cap
 JOBS_TO_CUSTOMIZE_PER_RUN = 1
 MAX_JOBS_PER_SEARCH = {
-    "linkedin": 10,
-    "careers_future": 10,
+    "linkedin": 15,
+    "careers_future": 15,
     "jobstreet": 10,
     "careers_gov": 10,
 }
