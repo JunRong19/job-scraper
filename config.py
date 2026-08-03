@@ -50,11 +50,15 @@ JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRele
 JOBSTREET_MAX_PAGES = 1 # 30 job IDs per page
 
 CAREERS_GOV_BASE_URL = "https://jobs.careers.gov.sg"
-# Sitemap.xml has no per-job date or search filtering, so these keywords are matched
-# (case-insensitive substring) against each candidate job's title after fetching it,
-# rather than sent as a server-side query like the other sources.
-CAREERS_GOV_SEARCH_QUERIES = ["software engineer", "software developer", "ai engineer", "game developer", "game programmer", "unity developer", "gameplay programmer"]
-CAREERS_GOV_MAX_NEW_JOBS_PER_RUN = 5 # Caps sitemap candidates fetched+filtered per run, not a per-query limit
+# Careers@Gov's own search (used by the browser search bar) hits Algolia directly, not
+# jobs.careers.gov.sg/api/ — a separate third-party domain the site explicitly calls
+# client-side with a public, referer-restricted, search-only API key. Confirmed via
+# browser network inspection. This is unrelated to robots.txt's Disallow: /api/, which
+# only scopes jobs.careers.gov.sg's own domain.
+CAREERS_GOV_ALGOLIA_URL = "https://3ow7d8b4iz-dsn.algolia.net/1/indexes/job_index/query"
+CAREERS_GOV_ALGOLIA_APP_ID = "3OW7D8B4IZ"
+CAREERS_GOV_ALGOLIA_API_KEY = "32fa71d8b0bc06be1e6395bf8c430107"
+CAREERS_GOV_SEARCH_QUERIES = ["software", "ai"]
 
 SELF_HOSTED_SCRAPING_SOURCES = ["careers_gov", "jobstreet"] # "careers_gov", "jobstreet"
 
@@ -66,6 +70,7 @@ MAX_JOBS_PER_SEARCH = {
     "linkedin": 3,
     "careers_future": 5,
     "jobstreet": 3,
+    "careers_gov": 5,
 }
 
 # =================================================================

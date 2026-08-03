@@ -3,8 +3,7 @@ import time
 import random
 import logging
 import json
-import re
-import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 import config
 import supabase_utils
 from scraper import convert_html_to_markdown
@@ -278,183 +277,113 @@ def process_jobstreet_query(search_query: str, limit: int = None) -> list:
 # =====================================================================
 # Careers@Gov Scraping Logic
 # =====================================================================
-def _parse_careers_gov_sitemap(xml_text: str) -> list:
-    """Parses sitemap.xml into a list of (job_id, uuid) tuples from /jobs/hrp/{id}/{uuid} URLs."""
-    ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-    entries = []
-    try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as e:
-        logging.error(f"Failed to parse Careers@Gov sitemap XML: {e}")
-        return entries
-
-    for url_el in root.findall("sm:url", ns):
-        loc_el = url_el.find("sm:loc", ns)
-        if loc_el is None or not loc_el.text:
-            continue
-        m = re.search(r"/jobs/hrp/(\d+)/([0-9a-fA-F-]+)", loc_el.text)
-        if m:
-            entries.append((m.group(1), m.group(2)))
-
-    return entries
-
-def _extract_job_posting_ld_json(html: str) -> dict | None:
-    """Extracts the schema.org JobPosting JSON-LD block Careers@Gov embeds in every job page."""
-    for m in re.finditer(r'<script type="application/ld\+json"[^>]*>(.*?)</script>', html, re.S):
-        try:
-            data = json.loads(m.group(1))
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict) and data.get("@type") == "JobPosting":
-            return data
-    return None
-
-def _matches_careers_gov_keywords(title: str | None) -> bool:
-    if not title:
-        return False
-    title_lower = title.lower()
-    return any(keyword.lower() in title_lower for keyword in config.CAREERS_GOV_SEARCH_QUERIES)
-
-def _fetch_careers_gov_job_details(job_id: str, uuid: str) -> dict | None:
-    """Fetches a Careers@Gov job page and extracts its JobPosting JSON-LD, filtered by title keywords."""
-
-    job_detail_url = f"{config.CAREERS_GOV_BASE_URL}/jobs/hrp/{job_id}/{uuid}"
-
-    logging.info(f"Preparing to fetch details for Careers@Gov job ID: {job_id}")
-
-    sleep_time = random.uniform(3.0, 10.0)
-    logging.info(f"Waiting for {sleep_time:.2f} seconds before fetching details...")
-    time.sleep(sleep_time)
-
-    user_agent = random.choice(MODERN_USER_AGENTS)
-    headers = {'User-Agent': user_agent}
-
-    logging.info(f"Fetching details from: {job_detail_url}")
-
-    resp = None
-    retries = 0
-    while retries <= config.MAX_RETRIES:
-        try:
-            resp = requests.get(job_detail_url, headers=headers, timeout=config.REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            break
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 429 and retries < config.MAX_RETRIES:
-                retries += 1
-                wait_time = config.RETRY_DELAY_SECONDS + random.uniform(0, 5)
-
-                logging.warning(f"Error 429 for job ID {job_id}. Retrying attempt {retries}/{config.MAX_RETRIES} after {wait_time:.2f} seconds...")
-                time.sleep(wait_time)
-                user_agent = random.choice(MODERN_USER_AGENTS)
-                headers = {'User-Agent': user_agent}
-
-                logging.info(f"Retrying job {job_id} with new User-Agent: {user_agent}")
-                continue
-            elif e.response.status_code == 404:
-                logging.warning(f"Job details not found (404) for Careers@Gov job ID: {job_id}.")
-                return None
-            else:
-                logging.error(f"HTTP Error fetching details for Careers@Gov job ID {job_id}: {e}")
-                return None
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Request Exception fetching details for Careers@Gov job ID {job_id}: {e}")
-            return None
-
-    if resp is None:
-        logging.error(f"Failed to fetch details for Careers@Gov job ID {job_id} after {retries} retries (unexpected state).")
-        return None
-
-    try:
-        posting = _extract_job_posting_ld_json(resp.text)
-        if not posting:
-            logging.warning(f"No JobPosting JSON-LD found for Careers@Gov job ID {job_id}.")
-            return None
-
-        title = posting.get("title")
-        if not _matches_careers_gov_keywords(title):
-            logging.info(f"Skipping Careers@Gov job ID {job_id}: title '{title}' doesn't match search keywords.")
-            return None
-
-        hiring_org = posting.get("hiringOrganization") or {}
-        content_html = posting.get("description") or ""
-        description = convert_html_to_markdown(content_html) if content_html.strip() else None
-        if not content_html.strip():
-            logging.warning(f"Description HTML was empty for Careers@Gov job ID {job_id}. Skipping conversion.")
-
-        job_details = {
-            "job_id": job_id,
-            "company": hiring_org.get("name"),
-            "job_title": title,
-            "location": "Singapore",
-            "level": None,
-            "provider": "careers_gov",
-            "description": description,
-            "posted_at": posting.get("datePosted"),
-        }
-
-        return job_details
-
-    except Exception as e:
-        logging.error(f"General Error processing details for Careers@Gov job ID {job_id} after successful fetch: {e}")
-        return None
-
-def process_careers_gov() -> list:
+def _fetch_careers_gov_search_hits(query: str, hits_per_page: int) -> list:
     """
-    Orchestrates scraping for Careers@Gov: fetches the full sitemap (the only crawl path
-    robots.txt allows besides /api/, which is explicitly disallowed), filters against
-    Supabase, then fetches + keyword-filters details for the newest unseen candidates.
+    Queries Careers@Gov's Algolia search index directly — the same call the site's own
+    search bar makes client-side. Requires a matching Referer/Origin header since the
+    public API key is referer-restricted.
     """
-
-    logging.info("--- Starting Phase 1: Fetching Careers@Gov sitemap ---")
-    sitemap_url = f"{config.CAREERS_GOV_BASE_URL}/sitemap.xml"
-
-    user_agent = random.choice(MODERN_USER_AGENTS)
-    headers = {'User-Agent': user_agent}
+    headers = {
+        'Content-Type': 'application/json',
+        'Referer': config.CAREERS_GOV_BASE_URL + '/',
+        'Origin': config.CAREERS_GOV_BASE_URL,
+        'User-Agent': random.choice(MODERN_USER_AGENTS),
+    }
+    params = {
+        'x-algolia-application-id': config.CAREERS_GOV_ALGOLIA_APP_ID,
+        'x-algolia-api-key': config.CAREERS_GOV_ALGOLIA_API_KEY,
+    }
+    payload = {'query': query, 'hitsPerPage': hits_per_page, 'page': 0}
 
     try:
-        res = requests.get(sitemap_url, headers=headers, timeout=config.REQUEST_TIMEOUT)
-        res.raise_for_status()
+        resp = requests.post(
+            config.CAREERS_GOV_ALGOLIA_URL,
+            headers=headers,
+            params=params,
+            json=payload,
+            timeout=config.REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
     except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to fetch Careers@Gov sitemap: {e}")
+        logging.error(f"Failed to query Careers@Gov search for '{query}': {e}")
         return []
 
-    entries = _parse_careers_gov_sitemap(res.text)
-    logging.info(f"--- Finished Phase 1: Sitemap contains {len(entries)} job URLs ---")
-    if not entries:
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as e:
+        logging.error(f"Failed to parse Careers@Gov search response for '{query}': {e}")
+        return []
+
+    hits = data.get('hits') or []
+    logging.info(f"Careers@Gov search for '{query}' returned {len(hits)} hit(s) (of {data.get('nbHits')} total matching).")
+    return hits
+
+def _careers_gov_hit_to_job_details(hit: dict) -> dict | None:
+    """Converts a single Algolia search hit into the standard job_details dict."""
+    object_id = hit.get('objectID')
+    title = hit.get('title')
+    if not object_id or not title:
+        return None
+
+    description = (hit.get('description') or '').replace('\xa0', ' ').strip()
+
+    posted_at = None
+    activity_ts = hit.get('activityTimestamp')
+    if activity_ts:
+        try:
+            posted_at = datetime.fromtimestamp(int(activity_ts) / 1000, tz=timezone.utc).isoformat()
+        except (ValueError, OSError):
+            posted_at = None
+
+    return {
+        "job_id": object_id,
+        "company": hit.get('agency'),
+        "job_title": title,
+        "location": "Singapore",
+        "level": None,
+        "provider": "careers_gov",
+        "description": description if description else None,
+        "posted_at": posted_at,
+    }
+
+def process_careers_gov_query(search_query: str, limit: int = None) -> list:
+    """
+    Orchestrates search + filtering for a single Careers@Gov query, mirroring the other
+    sources: fetch a batch of hits, filter against Supabase, truncate to limit. The search
+    response already includes the full description, so no per-job detail fetch is needed.
+    """
+    fetch_size = (limit or 5) * 4  # headroom so dedup filtering still leaves enough to reach `limit`
+    hits = _fetch_careers_gov_search_hits(search_query, hits_per_page=fetch_size)
+    if not hits:
+        logging.info(f"No search hits for Careers@Gov query '{search_query}'.")
         return []
 
     logging.info("\n--- Starting Filtering Step: Checking against Supabase ---")
     job_ids_set, _ = supabase_utils.get_existing_jobs_from_supabase()
 
-    candidates = [(jid, uuid) for jid, uuid in entries if jid not in job_ids_set]
-    logging.info(f"Found {len(entries)} sitemap entries, {len(job_ids_set)} existing IDs in Supabase, {len(candidates)} new candidates.")
+    new_hits = [h for h in hits if h.get('objectID') and h['objectID'] not in job_ids_set]
+    logging.info(f"Found {len(hits)} hits, {len(job_ids_set)} existing IDs in Supabase, {len(new_hits)} new.")
 
-    if not candidates:
-        logging.info("No new candidate job IDs to process after filtering.")
+    if not new_hits:
         return []
 
-    limit = config.CAREERS_GOV_MAX_NEW_JOBS_PER_RUN
-    if limit is not None and len(candidates) > limit:
-        logging.info(f"Truncating candidates from {len(candidates)} to {limit} to bound this run.")
-        candidates = candidates[:limit]
+    if limit is not None and len(new_hits) > limit:
+        logging.info(f"Truncating from {len(new_hits)} to {limit} to stay within source limit.")
+        new_hits = new_hits[:limit]
 
-    logging.info(f"\n--- Starting Phase 2: Fetching + Filtering {len(candidates)} Candidate Job(s) ---")
     detailed_new_jobs = []
-    processed_count = 0
+    for hit in new_hits:
+        details = _careers_gov_hit_to_job_details(hit)
+        if not details:
+            logging.warning(f"Skipping malformed Careers@Gov hit: {hit.get('objectID')}")
+            continue
+        description = details.get('description')
+        if not (description and description.strip()):
+            logging.warning(f"Skipping job ID {details['job_id']} due to missing or empty description.")
+            continue
+        detailed_new_jobs.append(details)
 
-    for job_id, uuid in candidates:
-        details = _fetch_careers_gov_job_details(job_id, uuid)
-        if details:
-            description = details.get('description')
-            if description and description.strip():
-                detailed_new_jobs.append(details)
-                processed_count += 1
-            else:
-                logging.warning(f"Skipping job ID {job_id} due to missing or empty description.")
-        # No else-log here: _fetch_careers_gov_job_details already logs the reason
-        # (fetch failure, no JSON-LD, or keyword mismatch) for the None case.
-
-    logging.info(f"--- Finished Phase 2: Successfully fetched details for {processed_count} new job(s) ---")
+    logging.info(f"--- Finished: {len(detailed_new_jobs)} new job(s) for query '{search_query}' ---")
     return detailed_new_jobs
 
 # --- Main Execution ---
@@ -464,13 +393,18 @@ if __name__ == "__main__":
 
     if "careers_gov" in config.SELF_HOSTED_SCRAPING_SOURCES:
         logging.info("\n--- Starting Careers@Gov Job Scraping ---")
-        new_careers_gov_jobs = process_careers_gov()
-        if new_careers_gov_jobs:
-            print(f"\n--- Saving {len(new_careers_gov_jobs)} new Careers@Gov job(s) ---")
-            supabase_utils.save_jobs_to_supabase(new_careers_gov_jobs)
-            total_new_jobs_saved += len(new_careers_gov_jobs)
-        else:
-            print("\nNo new Careers@Gov job details were fetched or processed.")
+        max_jobs_per_search = config.MAX_JOBS_PER_SEARCH.get("careers_gov", getattr(config, 'DEFAULT_MAX_JOBS_PER_SEARCH', 5))
+        for query in config.CAREERS_GOV_SEARCH_QUERIES:
+            print(f"\n{'='*20} Processing Careers@Gov Search Query: '{query}' {'='*20}")
+
+            new_careers_gov_jobs = process_careers_gov_query(query, limit=max_jobs_per_search)
+
+            if new_careers_gov_jobs:
+                print(f"\n--- Saving {len(new_careers_gov_jobs)} new job(s) for query '{query}' ---")
+                supabase_utils.save_jobs_to_supabase(new_careers_gov_jobs)
+                total_new_jobs_saved += len(new_careers_gov_jobs)
+            else:
+                print(f"\nNo new job details were fetched or processed for query '{query}'.")
     else:
         logging.info("\n--- Skipping Careers@Gov Job Scraping per config ---")
 
