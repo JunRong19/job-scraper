@@ -57,7 +57,7 @@ def _fetch_jobstreet_job_ids(search_query: str) -> list:
         target_url = (
             f"{config.JOBSTREET_BASE_URL}/jobs?keywords={search_query.replace(' ', '%20')}"
             f"&daterange={config.JOBSTREET_DATE_RANGE}&sortmode={config.JOBSTREET_SORT_MODE}"
-            f"&worktype={config.JOBSTREET_WORK_TYPE}&workarrangement={config.JOBSTREET_WORK_ARRANGEMENT}&page={page}"
+            f"&worktype={config.JOBSTREET_WORK_TYPE}&page={page}"
         )
 
         if page > 1:

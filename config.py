@@ -54,14 +54,15 @@ CAREERS_FUTURE_POSITION_LEVELS = ["Fresh/entry level"]
 # both sites block GitHub-hosted runner IPs at the WAF level) ---
 JOBSTREET_SEARCH_QUERIES = ["software", "ai", "unity"]
 JOBSTREET_BASE_URL = "https://sg.jobstreet.com"
-JOBSTREET_DATE_RANGE = 3 # Days since posting: 1=Past 24h, 3=Last 3 days, 7, 14, 30
+JOBSTREET_DATE_RANGE = 1 # Days since posting: 1=Past 24h, 3=Last 3 days, 7, 14, 30
 JOBSTREET_SORT_MODE = "ListedDate" # "ListedDate" (newest first) or "KeywordRelevance"
 JOBSTREET_MAX_PAGES = 1 # 30 job IDs per page
 # Verified live via SSR state echo (window.SEEK_REDUX_DATA): both params round-trip
 # correctly as plain query params on the generic /jobs?keywords=... path, no need for
 # JobStreet's SEO slug URLs (e.g. /software-engineer-jobs/full-time/on-site).
+# workarrangement dropped: stacking full-time + on-site + tight date range returned
+# almost no hits — most SG listings don't set on-site explicitly.
 JOBSTREET_WORK_TYPE = "242" # Full time (SEEK internal code; confirmed via /software-engineer-jobs/full-time)
-JOBSTREET_WORK_ARRANGEMENT = "1" # On-site (confirmed via /software-engineer-jobs/full-time/on-site)
 
 CAREERS_GOV_BASE_URL = "https://jobs.careers.gov.sg"
 # Careers@Gov's own search (used by the browser search bar) hits Algolia directly, not
