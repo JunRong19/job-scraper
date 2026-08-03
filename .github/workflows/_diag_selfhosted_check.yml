@@ -1,0 +1,22 @@
+name: Diagnostic Self-Hosted IP Check (temporary)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: self-hosted
+
+    steps:
+      - name: Check outbound access from self-hosted runner
+        shell: bash
+        run: |
+          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+          echo "=== jobs.careers.gov.sg ==="
+          curl -s -A "$UA" "https://jobs.careers.gov.sg/" -o cg.html -w "status=%{http_code} size=%{size_download}\n"
+          grep -o '<title>[^<]*</title>' cg.html | head -1 || true
+
+          echo "=== jobstreet ==="
+          curl -s -A "$UA" "https://sg.jobstreet.com/jobs?keywords=software%20engineer" -o js.html -w "status=%{http_code} size=%{size_download}\n"
+          grep -c "SEEK_REDUX_DATA" js.html || true
