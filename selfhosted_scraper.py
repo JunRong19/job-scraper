@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 import config
 import supabase_utils
-from scraper import convert_html_to_markdown
+from scraper import convert_html_to_markdown, job_title_is_excluded
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -261,6 +261,9 @@ def process_jobstreet_query(search_query: str, limit: int = None) -> list:
     for job_id in new_job_ids_to_process:
         details = _fetch_jobstreet_job_details(job_id)
         if details:
+            if job_title_is_excluded(details.get('job_title')):
+                logging.info(f"Skipping job ID {job_id}: title '{details.get('job_title')}' matches an excluded keyword.")
+                continue
             description = details.get('description')
             if description and description.strip():
                 if 'job_id' in details and details['job_id'] is not None:
@@ -586,11 +589,13 @@ def process_careers_gov_query(search_query: str, job_dataset: dict, limit: int =
 
     filtered_hits = []
     for h in new_hits:
+        if job_title_is_excluded(h.get('title')):
+            continue
         job_id_key = _careers_gov_job_id_from_object_id(h['objectID'])
         job_meta = job_dataset.get(job_id_key) if job_id_key else None
         if _careers_gov_matches_filters(job_meta):
             filtered_hits.append(h)
-    logging.info(f"{len(filtered_hits)} of {len(new_hits)} new hits are Full-time + {config.CAREERS_GOV_EXPERIENCE_LEVEL} experience.")
+    logging.info(f"{len(filtered_hits)} of {len(new_hits)} new hits are Full-time + {config.CAREERS_GOV_EXPERIENCE_LEVEL} experience (after excluded-keyword filter).")
     new_hits = filtered_hits
 
     if not new_hits:

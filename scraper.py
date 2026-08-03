@@ -60,6 +60,14 @@ def convert_html_to_markdown(html: str) -> str | None:
         logging.error(f"Error during HTML to Markdown conversion: {e}")
         return None
 
+def job_title_is_excluded(title: str | None) -> bool:
+    """Case-insensitive substring match against config.EXCLUDED_JOB_TITLE_KEYWORDS. Shared
+    across all sources so 'intern'/'senior'/'manager' etc. get filtered consistently."""
+    if not title:
+        return False
+    title_lower = title.lower()
+    return any(keyword.lower() in title_lower for keyword in config.EXCLUDED_JOB_TITLE_KEYWORDS)
+
 def _get_careers_future_job_company_name(job_item: dict) -> str | None:
     """Helper to extract company name, preferring hiringCompany."""
     if not isinstance(job_item, dict):
@@ -388,20 +396,23 @@ def process_linkedin_query(search_query: str, location: str, limit: int = None) 
     for job_id in ids_to_fetch:
         details = _fetch_linkedin_job_details(job_id)
         if details:
+            if job_title_is_excluded(details.get('job_title')):
+                logging.info(f"Skipping job ID {job_id}: title '{details.get('job_title')}' matches an excluded keyword.")
+                continue
             description = details.get('description')
-            if description and description.strip(): 
+            if description and description.strip():
                 if 'job_id' in details and details['job_id'] is not None:
                     detailed_new_jobs.append(details)
                     processed_count += 1
                 else:
-                    
+
                     logging.warning(f"Fetched details for {job_id} but missing 'job_id' key. Skipping.")
             else:
-                
-                logging.warning(f"Skipping job ID {job_id} due to missing or empty description.") 
+
+                logging.warning(f"Skipping job ID {job_id} due to missing or empty description.")
         else:
-            
-            logging.warning(f"Skipping job ID {job_id} as detail fetching failed or returned no data.") 
+
+            logging.warning(f"Skipping job ID {job_id} as detail fetching failed or returned no data.")
 
 
     logging.info(f"--- Finished Phase 2: Successfully fetched details for {processed_count} new job(s) ---")
@@ -676,6 +687,9 @@ def process_careers_future_query(search_query: str, limit: int = None) -> list:
     for job_id in new_job_ids_to_process:
         details = _fetch_careers_future_job_details(job_id)
         if details:
+            if job_title_is_excluded(details.get('job_title')):
+                logging.info(f"Skipping job ID {job_id}: title '{details.get('job_title')}' matches an excluded keyword.")
+                continue
             # --- NEW: Check for description before adding ---
             description = details.get('description')
             if description and description.strip(): # Ensure it's not None or an empty/whitespace string

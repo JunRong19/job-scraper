@@ -97,6 +97,10 @@ MAX_JOBS_PER_SEARCH = {
     "careers_gov": 10,
 }
 
+# Jobs whose title contains any of these (case-insensitive substring) are skipped during
+# scraping, across all sources, before being saved to Supabase.
+EXCLUDED_JOB_TITLE_KEYWORDS = ["intern", "senior", "manager"]
+
 # =================================================================
 # 3. ADVANCED SYSTEM SETTINGS (Modify with Caution)
 # =================================================================
