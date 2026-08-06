@@ -96,11 +96,13 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
     # Create custom styles
     styles = getSampleStyleSheet()
 
-    # Define a modern color palette
-    primary_color = colors.HexColor('#1976D2')  # Modern blue
+    # Color palette matched by sampling the real resume.pdf directly
+    primary_color = colors.HexColor('#365F91')  # Section heading blue (measured)
     secondary_color = colors.HexColor('#455A64')  # Dark blue-gray
     text_color = colors.HexColor('#212121')  # Near black
     light_text = colors.HexColor('#757575')  # Medium gray
+    hr_color = colors.HexColor('#000000')  # Section rule (measured: pure black)
+    link_color = colors.HexColor('#0000FF')  # Hyperlink text (measured: pure blue)
 
     # Create custom styles using ReportLab's built-in fonts
     style_name = ParagraphStyle(
@@ -108,7 +110,7 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
         parent=styles['Heading1'],
         fontSize=24,
         alignment=TA_CENTER,
-        spaceAfter=2,
+        spaceAfter=10,
         fontName='Times-Bold',
         textColor=text_color,
     )
@@ -203,8 +205,10 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
         parent=styles['Normal'],
         fontSize=10,
         leading=14,
-        leftIndent=15,
-        bulletIndent=0,
+        leftIndent=24,
+        bulletIndent=10,
+        bulletFontName='Helvetica',
+        bulletFontSize=8,
         fontName='Helvetica',
         textColor=text_color,
         spaceAfter=4,
@@ -229,7 +233,7 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
     def format_link(url, label):
         clean_url = url if url.startswith('http') else f"https://{url}"
         clean_url = clean_url.replace('&', '&amp;')
-        return f'<u><a href="{clean_url}"><font color="#1976D2">{label}</font></a></u>'
+        return f'<u><a href="{clean_url}"><font color="#0000FF">{label}</font></a></u>'
 
     tagline_parts = []
     if resume_data.title and resume_data.title != "NA":
@@ -260,7 +264,7 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
 
     if skill_categories:
         story.append(Paragraph("SKILLS", style_section_heading))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#2C3E50'), spaceBefore=0, spaceAfter=5))
+        story.append(HRFlowable(width="100%", thickness=1, color=hr_color, spaceBefore=0, spaceAfter=5))
 
         for cat in skill_categories:
             skills_str = ", ".join(s for s in cat.skills if s != "NA")
@@ -284,7 +288,7 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
 
         if skills_list:
             story.append(Paragraph("SKILLS", style_section_heading))
-            story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#2C3E50'), spaceBefore=0, spaceAfter=5))
+            story.append(HRFlowable(width="100%", thickness=1, color=hr_color, spaceBefore=0, spaceAfter=5))
 
             num_columns = 3  # We'll use a 3-column layout
 
@@ -333,9 +337,9 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
                 bullet_text = bullet.strip()
                 if bullet_text.startswith('-'):
                     bullet_text = bullet_text[1:].strip()
-                elif bullet_text.startswith('•'):
+                elif bullet_text.startswith(('•', '▪')):
                     bullet_text = bullet_text[1:].strip()
-                story.append(Paragraph(f"• {_markdown_bold_to_xml(bullet_text)}", style_bullet))
+                story.append(Paragraph(_markdown_bold_to_xml(bullet_text), style_bullet, bulletText='▪'))
         else:
             text = description.strip()
 
@@ -373,12 +377,12 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
                 if i < len(sentences) - 1 or not sentence[-1] in ['.', '!', '?']:
                     sentence = sentence + '.'
 
-                story.append(Paragraph(f"• {_markdown_bold_to_xml(sentence.strip())}", style_bullet))
+                story.append(Paragraph(_markdown_bold_to_xml(sentence.strip()), style_bullet, bulletText='▪'))
 
     # --- Experience ---
     if resume_data.experience:
         story.append(Paragraph("PROFESSIONAL EXPERIENCE", style_section_heading))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#2C3E50'), spaceBefore=0, spaceAfter=5))
+        story.append(HRFlowable(width="100%", thickness=1, color=hr_color, spaceBefore=0, spaceAfter=5))
 
         for exp in resume_data.experience:
             # --- Line 1: Company name (bold) ---
@@ -424,7 +428,7 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
     # --- Projects ---
     if resume_data.projects:
         story.append(Paragraph("PROJECTS", style_section_heading))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#2C3E50'), spaceBefore=0, spaceAfter=5))
+        story.append(HRFlowable(width="100%", thickness=1, color=hr_color, spaceBefore=0, spaceAfter=5))
 
         for proj in resume_data.projects:
             if proj.name and proj.name != "NA":
@@ -444,7 +448,7 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
     # --- Education (kept last, after Skills/Experience/Projects) ---
     if resume_data.education:
         story.append(Paragraph("EDUCATION", style_section_heading))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#2C3E50'), spaceBefore=0, spaceAfter=5))
+        story.append(HRFlowable(width="100%", thickness=1, color=hr_color, spaceBefore=0, spaceAfter=5))
 
         for edu in resume_data.education:
             # Degree info
@@ -477,7 +481,7 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
     # --- Certifications ---
     if resume_data.certifications:
         story.append(Paragraph("CERTIFICATIONS", style_section_heading))
-        story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#2C3E50'), spaceBefore=0, spaceAfter=5))
+        story.append(HRFlowable(width="100%", thickness=1, color=hr_color, spaceBefore=0, spaceAfter=5))
 
         for cert in resume_data.certifications:
             if cert.name == "NA" and cert.issuer == "NA":
@@ -508,7 +512,7 @@ def create_resume_pdf(resume_data: Resume) -> bytes:
         lang_list =[l for l in resume_data.languages if l != "NA"]
         if lang_list:
             story.append(Paragraph("LANGUAGES", style_section_heading))
-            story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor('#2C3E50'), spaceBefore=0, spaceAfter=5))
+            story.append(HRFlowable(width="100%", thickness=1, color=hr_color, spaceBefore=0, spaceAfter=5))
             story.append(Paragraph(", ".join(lang_list), style_normal))
 
     try:
