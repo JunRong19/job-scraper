@@ -9,6 +9,7 @@ import logging
 import config
 import user_agents
 from supabase_utils import supabase # Use the initialized Supabase client
+from selfhosted_scraper import _extract_seek_redux_data, _careers_gov_detail_url, MODERN_USER_AGENTS
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -95,6 +96,146 @@ async def _check_single_linkedin_job_active(job_id: str, client: httpx.AsyncClie
     logging.error(f"Failed to check job {job_id} activity after {config.ACTIVE_CHECK_MAX_RETRIES + 1} attempts.")
     return None # Failed to determine status
 
+
+async def _check_single_careers_future_job_active(job_id: str, client: httpx.AsyncClient) -> bool | None:
+    """Checks if a single MyCareersFuture job is still active via its detail API."""
+    api_url = f"https://api.mycareersfuture.gov.sg/v2/jobs/{job_id}"
+    retries = 0
+
+    while retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+        try:
+            sleep_time = random.uniform(5.0, 15.0)
+            logging.info(f"Waiting for {sleep_time:.2f} seconds before next request...")
+            time.sleep(sleep_time)
+
+            headers = {'User-Agent': random.choice(user_agents.USER_AGENTS)}
+            response = await client.get(api_url, headers=headers, timeout=config.ACTIVE_CHECK_TIMEOUT)
+
+            if response.status_code == 404:
+                logging.info(f"CareersFuture job {job_id} returned 404. Marking as inactive.")
+                return True
+            if response.status_code >= 400:
+                logging.warning(f"CareersFuture job {job_id} check failed with status {response.status_code}. Assuming active for now.")
+                return False
+
+            return False
+
+        except httpx.TimeoutException:
+            logging.warning(f"Timeout checking CareersFuture job {job_id} (Attempt {retries+1}).")
+        except httpx.RequestError as e:
+            logging.warning(f"Request error checking CareersFuture job {job_id} (Attempt {retries+1}): {e}")
+        except Exception as e:
+            logging.error(f"Unexpected error checking CareersFuture job {job_id} (Attempt {retries+1}): {e}")
+
+        retries += 1
+        if retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+            wait_time = config.ACTIVE_CHECK_RETRY_DELAY + random.uniform(0, 5)
+            await asyncio.sleep(wait_time)
+
+    logging.error(f"Failed to check CareersFuture job {job_id} activity after {config.ACTIVE_CHECK_MAX_RETRIES + 1} attempts.")
+    return None
+
+
+async def _check_single_jobstreet_job_active(job_id: str, client: httpx.AsyncClient) -> bool | None:
+    """Checks if a single JobStreet job is still active (404, or the listing's own isExpired flag)."""
+    detail_url = f"{config.JOBSTREET_BASE_URL}/job/{job_id}"
+    retries = 0
+
+    while retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+        try:
+            sleep_time = random.uniform(5.0, 15.0)
+            logging.info(f"Waiting for {sleep_time:.2f} seconds before next request...")
+            time.sleep(sleep_time)
+
+            headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
+            response = await client.get(detail_url, headers=headers, timeout=config.ACTIVE_CHECK_TIMEOUT)
+
+            if response.status_code == 404:
+                logging.info(f"JobStreet job {job_id} returned 404. Marking as inactive.")
+                return True
+            if response.status_code >= 400:
+                logging.warning(f"JobStreet job {job_id} check failed with status {response.status_code}. Assuming active for now.")
+                return False
+
+            redux_data = _extract_seek_redux_data(response.text)
+            job = ((redux_data or {}).get('jobdetails', {}) or {}).get('result', {}).get('job')
+            if not job:
+                logging.warning(f"No job data found in SEEK_REDUX_DATA for JobStreet job {job_id}. Assuming active for now.")
+                return False
+            if job.get('isExpired'):
+                logging.info(f"JobStreet job {job_id} is flagged isExpired. Marking as inactive.")
+                return True
+
+            return False
+
+        except httpx.TimeoutException:
+            logging.warning(f"Timeout checking JobStreet job {job_id} (Attempt {retries+1}).")
+        except httpx.RequestError as e:
+            logging.warning(f"Request error checking JobStreet job {job_id} (Attempt {retries+1}): {e}")
+        except Exception as e:
+            logging.error(f"Unexpected error checking JobStreet job {job_id} (Attempt {retries+1}): {e}")
+
+        retries += 1
+        if retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+            wait_time = config.ACTIVE_CHECK_RETRY_DELAY + random.uniform(0, 5)
+            await asyncio.sleep(wait_time)
+
+    logging.error(f"Failed to check JobStreet job {job_id} activity after {config.ACTIVE_CHECK_MAX_RETRIES + 1} attempts.")
+    return None
+
+
+async def _check_single_careers_gov_job_active(job_id: str, client: httpx.AsyncClient) -> bool | None:
+    """Checks if a single Careers@Gov job is still active via its own detail page."""
+    detail_url = _careers_gov_detail_url(job_id)
+    if not detail_url:
+        logging.warning(f"Unrecognized Careers@Gov objectID format: {job_id}. Skipping activity check.")
+        return None
+
+    retries = 0
+    while retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+        try:
+            sleep_time = random.uniform(5.0, 15.0)
+            logging.info(f"Waiting for {sleep_time:.2f} seconds before next request...")
+            time.sleep(sleep_time)
+
+            headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
+            response = await client.get(detail_url, headers=headers, timeout=config.ACTIVE_CHECK_TIMEOUT)
+
+            if response.status_code == 404:
+                logging.info(f"Careers@Gov job {job_id} returned 404. Marking as inactive.")
+                return True
+            if response.status_code >= 400:
+                logging.warning(f"Careers@Gov job {job_id} check failed with status {response.status_code}. Assuming active for now.")
+                return False
+
+            return False
+
+        except httpx.TimeoutException:
+            logging.warning(f"Timeout checking Careers@Gov job {job_id} (Attempt {retries+1}).")
+        except httpx.RequestError as e:
+            logging.warning(f"Request error checking Careers@Gov job {job_id} (Attempt {retries+1}): {e}")
+        except Exception as e:
+            logging.error(f"Unexpected error checking Careers@Gov job {job_id} (Attempt {retries+1}): {e}")
+
+        retries += 1
+        if retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+            wait_time = config.ACTIVE_CHECK_RETRY_DELAY + random.uniform(0, 5)
+            await asyncio.sleep(wait_time)
+
+    logging.error(f"Failed to check Careers@Gov job {job_id} activity after {config.ACTIVE_CHECK_MAX_RETRIES + 1} attempts.")
+    return None
+
+
+# Maps a job's 'provider' column to its activity-check coroutine. Providers not listed
+# here (if any new scraper is added later without a check function) are simply skipped
+# by check_job_activity() rather than erroring.
+_PROVIDER_ACTIVE_CHECKS = {
+    "linkedin": _check_single_linkedin_job_active,
+    "careers_future": _check_single_careers_future_job_active,
+    "jobstreet": _check_single_jobstreet_job_active,
+    "careers_gov": _check_single_careers_gov_job_active,
+}
+
 # --- Main Management Functions ---
 
 async def mark_expired_jobs():
@@ -145,8 +286,10 @@ async def mark_expired_jobs():
     logging.info("--- Finished Task: Mark Expired Jobs ---")
 
 
-async def check_linkedin_job_activity():
-    """Checks if active jobs are still available on LinkedIn."""
+async def check_job_activity():
+    """Checks if active jobs are still available on their source portal (linkedin,
+    careers_future, jobstreet, careers_gov — any provider with a registered check
+    function in _PROVIDER_ACTIVE_CHECKS)."""
     logging.info("--- Starting Task: Check Job Activity ---")
     check_older_than_date = get_past_date(config.JOB_CHECK_DAYS)
     check_older_than_date_str = check_older_than_date.isoformat()
@@ -154,14 +297,13 @@ async def check_linkedin_job_activity():
 
     jobs_to_check = []
     try:
-        # Query for jobs needing a check: active AND older than N days
-        # Order by last_checked ASC to prioritize oldest checks
-        # Limit the number of checks per run
+        # Query for jobs needing a check: active AND older than N days, across all
+        # providers (not just LinkedIn). Order by last_checked ASC to prioritize
+        # the oldest checks, and limit the number of checks per run.
         excluded_statuses = ['applied', 'offer', 'interviewing'] # Add any status that means "don't expire"
         query = supabase.table(config.SUPABASE_TABLE_NAME)\
-            .select("job_id, last_checked")\
+            .select("job_id, provider, last_checked")\
             .eq("is_active", True)\
-            .eq("provider", "linkedin")\
             .not_.in_("status", excluded_statuses)\
             .lt("last_checked", check_older_than_date_str)\
             .order("last_checked", desc=False)\
@@ -181,27 +323,45 @@ async def check_linkedin_job_activity():
         return # Cannot proceed
 
     # Use httpx.AsyncClient for connection pooling and efficiency
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         tasks = []
         for job in jobs_to_check:
-            tasks.append(_check_single_linkedin_job_active(job['job_id'], client))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+            check_fn = _PROVIDER_ACTIVE_CHECKS.get(job.get('provider'))
+            if check_fn is None:
+                tasks.append(None) # No checker registered for this provider — skip live-checking it
+            else:
+                tasks.append(check_fn(job['job_id'], client))
+        results = await asyncio.gather(*(t for t in tasks if t is not None), return_exceptions=True)
+
+    # Re-align results (some entries were skipped, i.e. None placeholders) back onto jobs_to_check
+    result_iter = iter(results)
+    resolved = [next(result_iter) if t is not None else None for t in tasks]
 
     inactive_job_ids = []
     active_checked_job_ids = []
     failed_check_job_ids = []
+    skipped_unknown_provider = []
 
-    for i, result in enumerate(results):
+    for i, result in enumerate(resolved):
         job_id = jobs_to_check[i]['job_id']
-        if isinstance(result, Exception):
-            logging.error(f"Exception checking job {job_id}: {result}")
+        provider = jobs_to_check[i].get('provider')
+        if tasks[i] is None:
+            # No checker for this provider — still refresh last_checked so it doesn't
+            # permanently monopolize the oldest-first queue every run.
+            skipped_unknown_provider.append(job_id)
+            active_checked_job_ids.append(job_id)
+        elif isinstance(result, Exception):
+            logging.error(f"Exception checking job {job_id} ({provider}): {result}")
             failed_check_job_ids.append(job_id)
         elif result is True: # Job confirmed inactive
             inactive_job_ids.append(job_id)
         elif result is False: # Job confirmed active
             active_checked_job_ids.append(job_id)
-        elif result is None: # Check failed after retries
+        elif result is None: # Check failed after retries, or provider format unrecognized
             failed_check_job_ids.append(job_id)
+
+    if skipped_unknown_provider:
+        logging.warning(f"Skipped live-checking {len(skipped_unknown_provider)} job(s) with no registered provider checker: {skipped_unknown_provider}")
 
     logging.info(f"Activity Check Summary: Inactive={len(inactive_job_ids)}, Active={len(active_checked_job_ids)}, Failed={len(failed_check_job_ids)}")
 
@@ -213,7 +373,7 @@ async def check_linkedin_job_activity():
                 .in_("job_id", inactive_job_ids)\
                 .execute()
             # Add logging for update_inactive response count/data
-            logging.info(f"Marked {len(inactive_job_ids)} jobs as expired (no longer available on LinkedIn). Response: {update_inactive}")
+            logging.info(f"Marked {len(inactive_job_ids)} jobs as expired (no longer available on their source portal). Response: {update_inactive}")
 
 
         if active_checked_job_ids:
@@ -275,7 +435,7 @@ async def main():
     start_time = time.time()
 
     await mark_expired_jobs()
-    await check_linkedin_job_activity()
+    await check_job_activity()
     await delete_old_inactive_jobs()
 
     end_time = time.time()
