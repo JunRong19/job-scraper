@@ -43,11 +43,18 @@ def parse_resume_with_ai(resume_text):
     """
     print("Processing resume with AI model...")
 
-    prompt = f"""Extract and return the structured resume information from the text below. 
+    prompt = f"""Extract and return the structured resume information from the text below.
     Only use what is explicitly stated in the text and do not infer or invent any details.
-    
-    CRITICAL: If any information is missing or not available in the text, use "NA" for that field. 
-    This applies to all fields (e.g., summary, dates, location, links, etc.). 
+
+    - "title" is the professional headline shown near the candidate's name (e.g. "Software Engineer"),
+      not a job title from the experience section.
+    - "skill_categories" should mirror how skills are grouped in the text (e.g. "Languages:", "Tools:",
+      "AI / ML:"). Each category has a "label" and its "skills" list. If skills aren't grouped into
+      labeled categories in the text, leave "skill_categories" empty and put them all in the flat
+      "skills" list instead.
+
+    CRITICAL: If any information is missing or not available in the text, use "NA" for that field.
+    This applies to all fields (e.g., summary, dates, location, links, etc.).
     Do NOT leave fields empty or use empty strings.
 
     Resume text:

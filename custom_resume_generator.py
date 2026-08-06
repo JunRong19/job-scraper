@@ -20,6 +20,16 @@ import os
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- LLM Personalization Function ---
+def strip_em_dashes(text: str) -> str:
+    """
+    Safety net for the 'no em dashes' style rule: the LLM doesn't always follow
+    negative style instructions, so strip any that slip through.
+    """
+    if not text:
+        return text
+    return re.sub(r'\s*[—–]\s*', ', ', text)
+
+
 def extract_json_from_text(text: str) -> str:
     """
     Extracts and returns the first valid JSON string found in the text.
@@ -120,6 +130,15 @@ async def personalize_section_with_llm(
     3.  **Relevance:** Focus on aligning the candidate's existing experience and skills with the target job.
     4.  **Fact-Based:** All enhancements must be grounded in the provided "Full Resume Context" or "Original Content of This Section."
 
+    **WRITING STYLE — avoid text that reads as AI-generated:**
+    5.  **No buzzwords/clichés:** Never use words/phrases like "leverage(d)", "spearhead(ed)", "results-oriented",
+        "dynamic", "passionate", "proven track record", "synergy", "cutting-edge", "seamlessly", "utilize(d)",
+        "robust solution", "game-changer", "transformative". Use plain, specific verbs instead.
+    6.  **Vary sentence structure:** Do not make every bullet follow the identical "Verb + object + resulting in + metric"
+        template. Mix short direct statements with longer ones so it doesn't read as templated.
+    7.  **No em dashes:** Never use the em dash character (—) or en dash (–) anywhere in your output. Use a period,
+        comma, or the word "and" instead.
+
     You will receive the target job details, full resume context (excluding the section being edited), the specific section name to enhance, its original content, and section-specific instructions. Follow the output format example provided in the user prompt for the structure of the JSON.
     """
 
@@ -136,6 +155,7 @@ async def personalize_section_with_llm(
         - **CRITICAL: The core professional identity and experience level (e.g., "IT Support and Cybersecurity Specialist with 4+ years") from the "Original Content of This Section" MUST be preserved.** Do NOT change the candidate's stated primary role or invent a new one like "Frontend Engineer" if it wasn't their original title. The goal is to make their *existing* role and experience sound relevant, not to misrepresent their primary job function.
         - Highlight 2-3 key qualifications or experiences from the "Full Resume Context" or "Original Content of This Section" that ALIGN with the "Job Description." These highlighted aspects should be FACTUALLY based on the provided resume materials.
         - Use strong action verbs and keywords from the "Job Description" where appropriate, but ONLY when describing actual experiences or skills present in the resume.
+        - Vary sentence length and structure across the summary. Do not use the generic "[Role] with X years of experience in Y" template if it makes the summary sound generic; write it the way the candidate would actually describe themselves.
         - **ABSOLUTELY DO NOT INVENT new information, skills, projects, job titles, or responsibilities not explicitly found in the original resume materials.** Rephrasing and emphasizing existing facts is allowed; fabrication is not.
         - For example, if the original summary says "IT Support Specialist who developed a tool using React," do NOT change this to "Experienced Frontend Engineer." Instead, you might say "IT Support Specialist with experience developing user-facing tools using React, such as Click4IT..."
         ---
@@ -157,6 +177,7 @@ async def personalize_section_with_llm(
             - Integrate relevant skills from the "Full Resume Context" (especially any explicit skills list) and keywords from the "Target Job Description" naturally into the description.
             - Show HOW these skills were applied and what the IMPACT or achievement was. Quantify achievements if possible, based on the original content.
             - Example: Instead of "Used Python for scripting," try "Automated data processing tasks using Python scripts, reducing manual effort by 20%."
+            - Wrap the 1-2 most important metrics or impact phrases per bullet in **double asterisks** (e.g. "reducing manual effort by **20%**") so they render bold on the resume. Do not bold entire sentences, only the key phrase.
             - Do NOT invent skills or experiences. Stick to the candidate's actual background as reflected in the provided materials.
             ---
             **Expected JSON Output Structure:** {{"experience": {{"job_title": "Original Job Title", "company": "Original Company", "dates": "Original Dates", "description": "Enhanced description...", "location": "Original Location (if present)"}}}}
@@ -176,6 +197,7 @@ async def personalize_section_with_llm(
             - Integrate relevant skills from the "Full Resume Context" and keywords from the "Target Job Description" naturally into the description.
             - Show HOW these skills were applied.
             - Example: Instead of "Project using React," try "Developed a responsive UI for [Project Purpose] using React and Redux, improving user engagement."
+            - Wrap the 1-2 most important metrics or impact phrases per bullet in **double asterisks** so they render bold on the resume. Do not bold entire sentences, only the key phrase.
             - Do NOT invent skills or experiences.
             ---
             **Expected JSON Output Structure (for this single project item):** {{"project": {{"name": "Original Project Name", "technologies": ["Tech1", "Tech2"], "description": "Enhanced description...", "link": "Original Link (if present)"}}}}
@@ -256,18 +278,22 @@ async def personalize_section_with_llm(
     logging.info(f"Received {len(responses)} responses from Gemini for section: {section_name}")
 
     if(section_name == "summary"):
-        return getattr(responses[0], output_key)
+        return strip_em_dashes(getattr(responses[0], output_key))
     elif(section_name == "skills"):
         return getattr(responses[0], output_key)
     elif(section_name == "experience"):
         experience_list = []
         for response in responses:
-            experience_list.append(getattr(response, output_key))
+            exp = getattr(response, output_key)
+            exp.description = strip_em_dashes(exp.description)
+            experience_list.append(exp)
         return experience_list
     elif(section_name == "projects"):
         project_list = []
         for response in responses:
-            project_list.append(getattr(response, output_key))
+            proj = getattr(response, output_key)
+            proj.description = strip_em_dashes(proj.description)
+            project_list.append(proj)
         return project_list
 
 async def validate_customization(

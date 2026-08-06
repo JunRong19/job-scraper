@@ -118,9 +118,30 @@ def get_resume_score_from_ai(resume_text: str, job_details: Dict[str, Any]) -> O
     logging.info(f"Scoring job_id: {job_details.get('job_id')} with job_title: {job_title} and job_level: {job_level}")
 
     prompt = f"""
-    You are a scoring assistant. You will be given a resume and a job description.  
-    Based **only** on the information provided, **return exactly one integer between 0 and 100** (inclusive) that represents the candidate’s suitability for the role.  
-    Do **not** return any words, punctuation, or explanation—only the integer.
+    You are a scoring assistant grading how well a candidate's resume fits a job description.
+
+    **STEP 1 — Experience-level gate (check this first):**
+    Estimate the candidate's total years of professional (non-internship-length, non-freelance-gig)
+    experience from the resume's work history dates. Check whether the job description states a
+    minimum years-of-experience requirement (e.g. "2+ years", "3-5 years experience required").
+    - If the job's stated requirement clearly exceeds the candidate's demonstrated experience, AND
+      the job description does NOT explicitly welcome fresh graduates, entry-level candidates, or
+      interns (look for phrases like "fresh graduates welcome", "entry-level", "no experience
+      necessary", "new grad"), this is a hard experience mismatch: the final score MUST be 40 or
+      below, regardless of how well skills otherwise match.
+    - If the job doesn't state a minimum years requirement, or explicitly welcomes fresh
+      grads/entry-level candidates, or the candidate's experience meets/exceeds the requirement,
+      skip this cap and score normally using the criteria below.
+
+    **STEP 2 — If not capped by Step 1, weigh these criteria internally into a single 0-100 score:**
+    - Skills / tech-stack match to what the job actually requires (~40% weight)
+    - Experience level / seniority fit for the role (~25% weight)
+    - Domain / industry relevance to the job and company (~20% weight)
+    - Other qualifications: education, certifications, notable projects (~15% weight)
+
+    Base the score **only** on the resume and job description given below — do not assume
+    skills, experience, or qualifications that aren't stated. Reason through the criteria
+    silently; **do not show your reasoning**.
 
     --- RESUME ---
     {resume_text}
@@ -133,6 +154,8 @@ def get_resume_score_from_ai(resume_text: str, job_details: Dict[str, Any]) -> O
 
     {job_description}
     --- END JOB DESCRIPTION ---
+
+    Output **only** the final integer score (0-100). No words, no punctuation, no explanation.
 
     Score (0–100):
     """

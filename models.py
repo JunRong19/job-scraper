@@ -31,13 +31,19 @@ class Links(BaseModel):
     github: str = ""
     portfolio: str = ""
 
+class SkillCategory(BaseModel):
+    label: str = ""
+    skills: List[str] = Field(default_factory=list)
+
 class Resume(BaseModel):
     name: str = ""
+    title: str = ""
     email: str = ""
     phone: str = ""
     location: str = ""
     summary: str = ""
     skills: List[str] = Field(default_factory=list)
+    skill_categories: List[SkillCategory] = Field(default_factory=list)
     education: List[Education] = Field(default_factory=list)
     experience: List[Experience] = Field(default_factory=list)
     projects: List[Project] = Field(default_factory=list)
