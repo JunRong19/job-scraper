@@ -12,13 +12,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run self-hosted scraper script
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -Command ". '{0}'"
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
