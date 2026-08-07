@@ -137,26 +137,35 @@ async def _check_single_careers_future_job_active(job_id: str, client: httpx.Asy
     return None
 
 
-# JobStreet's WAF (Akamai-style bot detection) reliably 403-blocks httpx's async client
-# even after retries with heavy backoff, but never blocks `requests` — same headers, same
-# runner IP, so it's a TLS/HTTP2 client-fingerprint check, not a rate limit. Confirmed live:
-# httpx got 403'd 5/5 times over ~4 minutes of backoff; the scraper's requests-based fetch
-# to the same URL pattern from the same runner pool has never been blocked. So this check
-# runs synchronously via `requests` (in a thread, to stay compatible with the async gather
-# in check_job_activity) instead of sharing the httpx.AsyncClient the other providers use.
+# JobStreet's WAF occasionally 403s a detail-page GET (seen with both httpx and requests,
+# so this reads as rate/pattern-based rather than a pure client-fingerprint block — the
+# scraper avoids it by never hitting the same URL twice in quick succession). Retry 403s
+# with backoff same as any other transient failure instead of assuming active on the
+# first hit. Uses `requests` (in a thread, to stay compatible with the async gather in
+# check_job_activity) to match the scraper's proven client rather than httpx.
+JOBSTREET_MAX_RETRIES = 4
+JOBSTREET_403_BACKOFF_BASE = 25.0  # seconds; gives the WAF a real cooldown window
+
+
 def _fetch_jobstreet_active_sync(job_id: str) -> bool | None:
     """Blocking check via `requests`, matching the scraper's proven-working client fingerprint."""
     detail_url = f"{config.JOBSTREET_BASE_URL}/job/{job_id}"
-    headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
     retries = 0
 
-    while retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+    while retries <= JOBSTREET_MAX_RETRIES:
         try:
+            headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
             resp = requests.get(detail_url, headers=headers, timeout=config.ACTIVE_CHECK_TIMEOUT)
 
             if resp.status_code == 404:
                 logging.info(f"JobStreet job {job_id} returned 404. Marking as inactive.")
                 return True
+            if resp.status_code == 403:
+                logging.warning(f"JobStreet job {job_id} check got 403 (Attempt {retries+1}/{JOBSTREET_MAX_RETRIES+1}). Backing off and retrying.")
+                retries += 1
+                if retries <= JOBSTREET_MAX_RETRIES:
+                    time.sleep(JOBSTREET_403_BACKOFF_BASE * retries + random.uniform(0, 10))
+                continue
             if resp.status_code >= 400:
                 logging.warning(f"JobStreet job {job_id} check failed with status {resp.status_code}. Assuming active for now.")
                 return False
@@ -174,12 +183,11 @@ def _fetch_jobstreet_active_sync(job_id: str) -> bool | None:
 
         except requests.exceptions.RequestException as e:
             logging.warning(f"Request error checking JobStreet job {job_id} (Attempt {retries+1}): {e}")
+            retries += 1
+            if retries <= JOBSTREET_MAX_RETRIES:
+                time.sleep(config.ACTIVE_CHECK_RETRY_DELAY + random.uniform(0, 5))
 
-        retries += 1
-        if retries <= config.ACTIVE_CHECK_MAX_RETRIES:
-            time.sleep(config.ACTIVE_CHECK_RETRY_DELAY + random.uniform(0, 5))
-
-    logging.error(f"Failed to check JobStreet job {job_id} activity after {config.ACTIVE_CHECK_MAX_RETRIES + 1} attempts.")
+    logging.error(f"Failed to check JobStreet job {job_id} activity after {JOBSTREET_MAX_RETRIES + 1} attempts.")
     return None
 
 
