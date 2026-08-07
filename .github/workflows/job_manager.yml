@@ -9,24 +9,24 @@ on:
 
 jobs:
   manage:
-    runs-on: ubuntu-latest # Use a standard Linux runner
+    # JobStreet and Careers@Gov block GitHub-hosted runner IPs (see scrape_selfhosted.yml),
+    # and check_job_activity() checks all four providers in one script, so this must run on
+    # the self-hosted runner too rather than ubuntu-latest.
+    runs-on: self-hosted
 
     steps:
       - name: Checkout repository code
         uses: actions/checkout@v4 # Checks out your code
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11" # Specify your desired Python version
-
       - name: Install dependencies
+        shell: powershell -ExecutionPolicy Bypass -Command ". '{0}'"
         run: |
           python -m pip install --upgrade pip
           # Ensure requirements.txt includes httpx if not already added
           pip install -r requirements.txt
 
       - name: Run job manager script
+        shell: powershell -ExecutionPolicy Bypass -Command ". '{0}'"
         env:
           # Define environment variables needed by your script
           # These should be set as Secrets in your GitHub repository settings
