@@ -136,14 +136,22 @@ async def _check_single_careers_future_job_active(job_id: str, client: httpx.Asy
     return None
 
 
+# JobStreet's WAF 403-blocks GitHub Actions runners under request bursts more readily
+# than plain network errors do, so it gets its own (slower, more patient) retry budget
+# instead of sharing config.ACTIVE_CHECK_MAX_RETRIES/ACTIVE_CHECK_RETRY_DELAY with the
+# other providers.
+JOBSTREET_MAX_RETRIES = 4
+JOBSTREET_403_BACKOFF_BASE = 25.0  # seconds; gives the WAF a real cooldown window
+
+
 async def _check_single_jobstreet_job_active(job_id: str, client: httpx.AsyncClient) -> bool | None:
     """Checks if a single JobStreet job is still active (404, or the listing's own isExpired flag)."""
     detail_url = f"{config.JOBSTREET_BASE_URL}/job/{job_id}"
     retries = 0
 
-    while retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+    while retries <= JOBSTREET_MAX_RETRIES:
         try:
-            sleep_time = random.uniform(5.0, 15.0)
+            sleep_time = random.uniform(8.0, 20.0)
             logging.info(f"Waiting for {sleep_time:.2f} seconds before next request...")
             time.sleep(sleep_time)
 
@@ -153,6 +161,15 @@ async def _check_single_jobstreet_job_active(job_id: str, client: httpx.AsyncCli
             if response.status_code == 404:
                 logging.info(f"JobStreet job {job_id} returned 404. Marking as inactive.")
                 return True
+            if response.status_code == 403:
+                # Likely a transient WAF block on the runner's IP rather than the job
+                # being gone — retry with backoff instead of assuming active/inactive.
+                logging.warning(f"JobStreet job {job_id} check got 403 (Attempt {retries+1}/{JOBSTREET_MAX_RETRIES+1}). Likely a WAF block, backing off and retrying.")
+                retries += 1
+                if retries <= JOBSTREET_MAX_RETRIES:
+                    wait_time = JOBSTREET_403_BACKOFF_BASE * retries + random.uniform(0, 10)
+                    await asyncio.sleep(wait_time)
+                continue
             if response.status_code >= 400:
                 logging.warning(f"JobStreet job {job_id} check failed with status {response.status_code}. Assuming active for now.")
                 return False
@@ -176,11 +193,11 @@ async def _check_single_jobstreet_job_active(job_id: str, client: httpx.AsyncCli
             logging.error(f"Unexpected error checking JobStreet job {job_id} (Attempt {retries+1}): {e}")
 
         retries += 1
-        if retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+        if retries <= JOBSTREET_MAX_RETRIES:
             wait_time = config.ACTIVE_CHECK_RETRY_DELAY + random.uniform(0, 5)
             await asyncio.sleep(wait_time)
 
-    logging.error(f"Failed to check JobStreet job {job_id} activity after {config.ACTIVE_CHECK_MAX_RETRIES + 1} attempts.")
+    logging.error(f"Failed to check JobStreet job {job_id} activity after {JOBSTREET_MAX_RETRIES + 1} attempts.")
     return None
 
 
