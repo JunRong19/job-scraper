@@ -1,5 +1,6 @@
 import asyncio
 import httpx
+import requests
 import random
 import time
 from datetime import datetime, timedelta, timezone
@@ -136,45 +137,31 @@ async def _check_single_careers_future_job_active(job_id: str, client: httpx.Asy
     return None
 
 
-# JobStreet's WAF 403-blocks GitHub Actions runners under request bursts more readily
-# than plain network errors do, so it gets its own (slower, more patient) retry budget
-# instead of sharing config.ACTIVE_CHECK_MAX_RETRIES/ACTIVE_CHECK_RETRY_DELAY with the
-# other providers.
-JOBSTREET_MAX_RETRIES = 4
-JOBSTREET_403_BACKOFF_BASE = 25.0  # seconds; gives the WAF a real cooldown window
-
-
-async def _check_single_jobstreet_job_active(job_id: str, client: httpx.AsyncClient) -> bool | None:
-    """Checks if a single JobStreet job is still active (404, or the listing's own isExpired flag)."""
+# JobStreet's WAF (Akamai-style bot detection) reliably 403-blocks httpx's async client
+# even after retries with heavy backoff, but never blocks `requests` — same headers, same
+# runner IP, so it's a TLS/HTTP2 client-fingerprint check, not a rate limit. Confirmed live:
+# httpx got 403'd 5/5 times over ~4 minutes of backoff; the scraper's requests-based fetch
+# to the same URL pattern from the same runner pool has never been blocked. So this check
+# runs synchronously via `requests` (in a thread, to stay compatible with the async gather
+# in check_job_activity) instead of sharing the httpx.AsyncClient the other providers use.
+def _fetch_jobstreet_active_sync(job_id: str) -> bool | None:
+    """Blocking check via `requests`, matching the scraper's proven-working client fingerprint."""
     detail_url = f"{config.JOBSTREET_BASE_URL}/job/{job_id}"
+    headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
     retries = 0
 
-    while retries <= JOBSTREET_MAX_RETRIES:
+    while retries <= config.ACTIVE_CHECK_MAX_RETRIES:
         try:
-            sleep_time = random.uniform(8.0, 20.0)
-            logging.info(f"Waiting for {sleep_time:.2f} seconds before next request...")
-            time.sleep(sleep_time)
+            resp = requests.get(detail_url, headers=headers, timeout=config.ACTIVE_CHECK_TIMEOUT)
 
-            headers = {'User-Agent': random.choice(MODERN_USER_AGENTS)}
-            response = await client.get(detail_url, headers=headers, timeout=config.ACTIVE_CHECK_TIMEOUT)
-
-            if response.status_code == 404:
+            if resp.status_code == 404:
                 logging.info(f"JobStreet job {job_id} returned 404. Marking as inactive.")
                 return True
-            if response.status_code == 403:
-                # Likely a transient WAF block on the runner's IP rather than the job
-                # being gone — retry with backoff instead of assuming active/inactive.
-                logging.warning(f"JobStreet job {job_id} check got 403 (Attempt {retries+1}/{JOBSTREET_MAX_RETRIES+1}). Likely a WAF block, backing off and retrying.")
-                retries += 1
-                if retries <= JOBSTREET_MAX_RETRIES:
-                    wait_time = JOBSTREET_403_BACKOFF_BASE * retries + random.uniform(0, 10)
-                    await asyncio.sleep(wait_time)
-                continue
-            if response.status_code >= 400:
-                logging.warning(f"JobStreet job {job_id} check failed with status {response.status_code}. Assuming active for now.")
+            if resp.status_code >= 400:
+                logging.warning(f"JobStreet job {job_id} check failed with status {resp.status_code}. Assuming active for now.")
                 return False
 
-            redux_data = _extract_seek_redux_data(response.text)
+            redux_data = _extract_seek_redux_data(resp.text)
             job = ((redux_data or {}).get('jobdetails', {}) or {}).get('result', {}).get('job')
             if not job:
                 logging.warning(f"No job data found in SEEK_REDUX_DATA for JobStreet job {job_id}. Assuming active for now.")
@@ -185,20 +172,23 @@ async def _check_single_jobstreet_job_active(job_id: str, client: httpx.AsyncCli
 
             return False
 
-        except httpx.TimeoutException:
-            logging.warning(f"Timeout checking JobStreet job {job_id} (Attempt {retries+1}).")
-        except httpx.RequestError as e:
+        except requests.exceptions.RequestException as e:
             logging.warning(f"Request error checking JobStreet job {job_id} (Attempt {retries+1}): {e}")
-        except Exception as e:
-            logging.error(f"Unexpected error checking JobStreet job {job_id} (Attempt {retries+1}): {e}")
 
         retries += 1
-        if retries <= JOBSTREET_MAX_RETRIES:
-            wait_time = config.ACTIVE_CHECK_RETRY_DELAY + random.uniform(0, 5)
-            await asyncio.sleep(wait_time)
+        if retries <= config.ACTIVE_CHECK_MAX_RETRIES:
+            time.sleep(config.ACTIVE_CHECK_RETRY_DELAY + random.uniform(0, 5))
 
-    logging.error(f"Failed to check JobStreet job {job_id} activity after {JOBSTREET_MAX_RETRIES + 1} attempts.")
+    logging.error(f"Failed to check JobStreet job {job_id} activity after {config.ACTIVE_CHECK_MAX_RETRIES + 1} attempts.")
     return None
+
+
+async def _check_single_jobstreet_job_active(job_id: str, client: httpx.AsyncClient) -> bool | None:
+    """Checks if a single JobStreet job is still active (404, or the listing's own isExpired flag)."""
+    sleep_time = random.uniform(5.0, 15.0)
+    logging.info(f"Waiting for {sleep_time:.2f} seconds before next request...")
+    await asyncio.sleep(sleep_time)
+    return await asyncio.to_thread(_fetch_jobstreet_active_sync, job_id)
 
 
 async def _check_single_careers_gov_job_active(job_id: str, client: httpx.AsyncClient) -> bool | None:
